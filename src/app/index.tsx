@@ -1,4 +1,6 @@
 import { router } from "expo-router";
+import MonitoramentoMap from "../components/MonitoramentoMap";
+
 import {
   SafeAreaView,
   ScrollView,
@@ -13,7 +15,9 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.logo}>VERDESCAN</Text>
+          <Text style={styles.logo}>
+            VERDESCAN
+          </Text>
 
           <Text style={styles.subtitle}>
             Monitoramento inteligente de vegetação
@@ -55,54 +59,48 @@ export default function HomeScreen() {
           Mapa de monitoramento
         </Text>
 
-        <View style={styles.mapPlaceholder}>
-          <Text style={styles.mapTitle}>
-            Mapa VerdeScan
-          </Text>
+        <View style={styles.mapWrapper}>
+          <MonitoramentoMap />
+        </View>
 
-          <Text style={styles.mapDescription}>
-            Aqui serão exibidos os pontos registrados pelas análises.
-          </Text>
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View
+              style={[
+                styles.legendPoint,
+                styles.greenPoint,
+              ]}
+            />
 
-          <View style={styles.points}>
-            <View style={styles.pointContainer}>
-              <View
-                style={[
-                  styles.point,
-                  styles.greenPoint,
-                ]}
-              />
+            <Text style={styles.legendText}>
+              Normal
+            </Text>
+          </View>
 
-              <Text style={styles.pointLabel}>
-                Normal
-              </Text>
-            </View>
+          <View style={styles.legendItem}>
+            <View
+              style={[
+                styles.legendPoint,
+                styles.yellowPoint,
+              ]}
+            />
 
-            <View style={styles.pointContainer}>
-              <View
-                style={[
-                  styles.point,
-                  styles.yellowPoint,
-                ]}
-              />
+            <Text style={styles.legendText}>
+              Atenção
+            </Text>
+          </View>
 
-              <Text style={styles.pointLabel}>
-                Atenção
-              </Text>
-            </View>
+          <View style={styles.legendItem}>
+            <View
+              style={[
+                styles.legendPoint,
+                styles.redPoint,
+              ]}
+            />
 
-            <View style={styles.pointContainer}>
-              <View
-                style={[
-                  styles.point,
-                  styles.redPoint,
-                ]}
-              />
-
-              <Text style={styles.pointLabel}>
-                Crítico
-              </Text>
-            </View>
+            <Text style={styles.legendText}>
+              Crítico
+            </Text>
           </View>
         </View>
 
@@ -259,43 +257,27 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  mapPlaceholder: {
+  mapWrapper: {
     marginHorizontal: 20,
-    height: 260,
-    borderRadius: 16,
-    backgroundColor: "#DDE9DF",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
   },
 
-  mapTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#164B2A",
-  },
-
-  mapDescription: {
-    marginTop: 8,
-    fontSize: 14,
-    color: "#526157",
-    textAlign: "center",
-  },
-
-  points: {
+  legend: {
     flexDirection: "row",
-    gap: 24,
-    marginTop: 26,
+    justifyContent: "center",
+    gap: 22,
+    marginTop: 12,
   },
 
-  pointContainer: {
+  legendItem: {
+    flexDirection: "row",
     alignItems: "center",
   },
 
-  point: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+  legendPoint: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 6,
   },
 
   greenPoint: {
@@ -310,9 +292,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#D63E3E",
   },
 
-  pointLabel: {
-    marginTop: 6,
-    fontSize: 12,
+  legendText: {
+    fontSize: 13,
     color: "#526157",
   },
 

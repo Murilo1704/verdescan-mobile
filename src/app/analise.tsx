@@ -23,17 +23,44 @@ type Localizacao = {
 };
 
 export default function AnaliseScreen() {
-  const [fotoUri, setFotoUri] = useState<string | null>(null);
+  const [fotoUri, setFotoUri] =
+    useState<string | null>(null);
+
+  const [origemFoto, setOrigemFoto] =
+    useState<"camera" | "galeria" | null>(null);
 
   const [localizacao, setLocalizacao] =
     useState<Localizacao | null>(null);
 
-  const [buscandoLocalizacao, setBuscandoLocalizacao] =
-    useState(false);
+  const [
+    buscandoLocalizacao,
+    setBuscandoLocalizacao,
+  ] = useState(false);
 
-  // =========================
-  // FOTO
-  // =========================
+  async function tirarFoto() {
+    const permissao =
+      await ImagePicker.requestCameraPermissionsAsync();
+
+    if (!permissao.granted) {
+      mostrarMensagem(
+        "Permissão necessária",
+        "O VerdeScan precisa acessar a câmera para registrar a vegetação."
+      );
+
+      return;
+    }
+
+    const resultado =
+      await ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+    if (!resultado.canceled) {
+      setFotoUri(resultado.assets[0].uri);
+      setOrigemFoto("camera");
+    }
+  }
 
   async function selecionarFoto() {
     const permissao =
@@ -42,7 +69,7 @@ export default function AnaliseScreen() {
     if (!permissao.granted) {
       mostrarMensagem(
         "Permissão necessária",
-        "É necessário permitir acesso às fotos."
+        "O VerdeScan precisa acessar suas fotos."
       );
 
       return;
@@ -57,12 +84,9 @@ export default function AnaliseScreen() {
 
     if (!resultado.canceled) {
       setFotoUri(resultado.assets[0].uri);
+      setOrigemFoto("galeria");
     }
   }
-
-  // =========================
-  // LOCALIZAÇÃO
-  // =========================
 
   async function capturarLocalizacao() {
     try {
@@ -74,7 +98,7 @@ export default function AnaliseScreen() {
       if (status !== "granted") {
         mostrarMensagem(
           "Permissão necessária",
-          "O VerdeScan precisa da sua localização para registrar onde a análise foi realizada."
+          "O VerdeScan precisa da localização para registrar onde a análise foi realizada."
         );
 
         return;
@@ -95,16 +119,12 @@ export default function AnaliseScreen() {
 
       mostrarMensagem(
         "Erro de localização",
-        "Não foi possível obter sua localização. Verifique se o GPS está ativado."
+        "Não foi possível obter sua localização."
       );
     } finally {
       setBuscandoLocalizacao(false);
     }
   }
-
-  // =========================
-  // MENSAGENS
-  // =========================
 
   function mostrarMensagem(
     titulo: string,
@@ -118,18 +138,13 @@ export default function AnaliseScreen() {
     Alert.alert(titulo, mensagem);
   }
 
-  // =========================
-  // VALIDAÇÃO
-  // =========================
-
   const podeAnalisar =
-    fotoUri !== null && localizacao !== null;
+    fotoUri !== null &&
+    localizacao !== null;
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
-        {/* CABEÇALHO */}
-
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => router.back()}
@@ -148,8 +163,6 @@ export default function AnaliseScreen() {
           </Text>
         </View>
 
-        {/* FOTO */}
-
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
             1. Foto da vegetação
@@ -167,9 +180,28 @@ export default function AnaliseScreen() {
                   <View style={styles.successPoint} />
 
                   <Text style={styles.successText}>
-                    Foto selecionada
+                    Foto registrada
                   </Text>
                 </View>
+
+                <Text style={styles.photoOrigin}>
+                  {origemFoto === "camera"
+                    ? "Foto tirada pela câmera"
+                    : "Imagem selecionada da galeria"}
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.primaryPhotoButton}
+                  onPress={tirarFoto}
+                >
+                  <Text
+                    style={
+                      styles.primaryPhotoButtonText
+                    }
+                  >
+                    Tirar nova foto
+                  </Text>
+                </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.secondaryButton}
@@ -178,7 +210,7 @@ export default function AnaliseScreen() {
                   <Text
                     style={styles.secondaryButtonText}
                   >
-                    Trocar foto
+                    Escolher outra da galeria
                   </Text>
                 </TouchableOpacity>
               </>
@@ -189,13 +221,26 @@ export default function AnaliseScreen() {
                 </Text>
 
                 <Text style={styles.cardTitle}>
-                  Nenhuma foto registrada
+                  Registre a vegetação
                 </Text>
 
                 <Text style={styles.cardText}>
-                  Selecione uma foto do trecho que deseja
-                  analisar.
+                  Tire uma foto no local ou escolha uma
+                  imagem existente para realizar a análise.
                 </Text>
+
+                <TouchableOpacity
+                  style={styles.primaryPhotoButton}
+                  onPress={tirarFoto}
+                >
+                  <Text
+                    style={
+                      styles.primaryPhotoButtonText
+                    }
+                  >
+                    Tirar foto agora
+                  </Text>
+                </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.secondaryButton}
@@ -204,15 +249,13 @@ export default function AnaliseScreen() {
                   <Text
                     style={styles.secondaryButtonText}
                   >
-                    Selecionar foto
+                    Escolher da galeria
                   </Text>
                 </TouchableOpacity>
               </>
             )}
           </View>
         </View>
-
-        {/* LOCALIZAÇÃO */}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
@@ -291,7 +334,9 @@ export default function AnaliseScreen() {
                     </Text>
                   </View>
 
-                  <View style={styles.locationDivider} />
+                  <View
+                    style={styles.locationDivider}
+                  />
 
                   <View style={styles.locationItem}>
                     <Text
@@ -325,7 +370,6 @@ export default function AnaliseScreen() {
                 <TouchableOpacity
                   style={styles.secondaryButton}
                   onPress={capturarLocalizacao}
-                  disabled={buscandoLocalizacao}
                 >
                   <Text
                     style={styles.secondaryButtonText}
@@ -337,8 +381,6 @@ export default function AnaliseScreen() {
             )}
           </View>
         </View>
-
-        {/* CLASSIFICAÇÃO */}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
@@ -352,7 +394,7 @@ export default function AnaliseScreen() {
 
             <Text style={styles.cardText}>
               A inteligência artificial classificará
-              o trecho de acordo com o nível da
+              o trecho de acordo com a altura da
               vegetação.
             </Text>
 
@@ -399,8 +441,6 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
-        {/* BOTÃO ANALISAR */}
-
         <TouchableOpacity
           style={[
             styles.analyzeButton,
@@ -409,7 +449,9 @@ export default function AnaliseScreen() {
           ]}
           disabled={!podeAnalisar}
           onPress={() => {
-            console.log("Pronto para análise");
+            console.log(
+              "Ocorrência pronta para classificação"
+            );
           }}
         >
           <Text style={styles.analyzeButtonText}>
@@ -417,17 +459,15 @@ export default function AnaliseScreen() {
           </Text>
         </TouchableOpacity>
 
-        {!podeAnalisar && (
+        {!podeAnalisar ? (
           <Text style={styles.helpText}>
-            Adicione uma foto e capture sua
-            localização para continuar.
+            Registre uma foto e capture sua localização
+            para continuar.
           </Text>
-        )}
-
-        {podeAnalisar && (
+        ) : (
           <Text style={styles.readyText}>
-            Foto e localização registradas. A
-            ocorrência está pronta para análise.
+            Foto e localização registradas. A ocorrência
+            está pronta para análise.
           </Text>
         )}
       </ScrollView>
@@ -519,7 +559,6 @@ const styles = StyleSheet.create({
   successRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
   },
 
   successPoint: {
@@ -536,13 +575,35 @@ const styles = StyleSheet.create({
     color: "#21894A",
   },
 
-  secondaryButton: {
+  photoOrigin: {
+    fontSize: 12,
+    color: "#6B756E",
+    marginTop: 5,
+  },
+
+  primaryPhotoButton: {
     marginTop: 18,
+    backgroundColor: "#21894A",
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 28,
+    minWidth: 210,
+    alignItems: "center",
+  },
+
+  primaryPhotoButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+
+  secondaryButton: {
+    marginTop: 12,
     backgroundColor: "#E5F2E9",
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 24,
-    minWidth: 180,
+    minWidth: 190,
     alignItems: "center",
   },
 
@@ -678,3 +739,4 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 });
+
