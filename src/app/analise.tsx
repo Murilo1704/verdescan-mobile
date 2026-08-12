@@ -20,25 +20,99 @@ import {
 import { adicionarOcorrencia } from "../services/storage";
 import { Ocorrencia } from "../types/Ocorrencia";
 
+
+// ============================================================
+// CONFIGURAÇÃO DA API
+// ============================================================
+
+// IP atual do notebook que está rodando a API.
+// Se o IPv4 do notebook mudar no futuro,
+// basta alterar somente esta linha.
+
+const API_URL =
+  "http://10.0.0.30:8000/analisar";
+
+
+// ============================================================
+// TIPOS
+// ============================================================
+
 type Localizacao = {
   latitude: number;
   longitude: number;
   precisao: number | null;
 };
 
+
+type ClasseAnalise =
+  | "NORMAL"
+  | "ATENCAO"
+  | "CRITICO"
+  | "INCONCLUSIVO";
+
+
 type ResultadoAnalise = {
-  classe: "NORMAL" | "ATENCAO" | "CRITICO";
+  classe: ClasseAnalise;
+
   confianca: number;
+
+  vegetacaoTotal: number;
+
+  vegetacaoBaixa: number;
+
+  vegetacaoAlta: number;
+
+  patchesAnalisados: number;
+
+  probabilidadeNormal: number;
+
+  probabilidadeAtencao: number;
+
+  probabilidadeCritico: number;
 };
+
+
+type RespostaAPI = {
+  status: string;
+
+  classe: ClasseAnalise;
+
+  confianca: number;
+
+  confianca_percentual?: number;
+
+  vegetacao_total: number;
+
+  vegetacao_baixa: number;
+
+  vegetacao_alta: number;
+
+  background?: number;
+
+  patches_analisados: number;
+
+  probabilidades?: {
+    ATENCAO?: number;
+    CRITICO?: number;
+    NORMAL?: number;
+  };
+
+  arquivo?: string;
+};
+
+
+// ============================================================
+// TELA
+// ============================================================
 
 export default function AnaliseScreen() {
   const [fotoUri, setFotoUri] =
     useState<string | null>(null);
 
   const [origemFoto, setOrigemFoto] =
-    useState<"camera" | "galeria" | null>(
-      null
-    );
+    useState<
+      "camera" | "galeria" | null
+    >(null);
 
   const [localizacao, setLocalizacao] =
     useState<Localizacao | null>(null);
@@ -59,8 +133,12 @@ export default function AnaliseScreen() {
       null
     );
 
+  const [analisando, setAnalisando] =
+    useState(false);
+
   const [salvando, setSalvando] =
     useState(false);
+
 
   // =========================================================
   // CÂMERA
@@ -68,7 +146,8 @@ export default function AnaliseScreen() {
 
   async function tirarFoto() {
     const permissao =
-      await ImagePicker.requestCameraPermissionsAsync();
+      await ImagePicker
+        .requestCameraPermissionsAsync();
 
     if (!permissao.granted) {
       mostrarMensagem(
@@ -80,23 +159,27 @@ export default function AnaliseScreen() {
     }
 
     const resultadoFoto =
-      await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
-        quality: 0.8,
-      });
+      await ImagePicker
+        .launchCameraAsync({
+          allowsEditing: false,
+          quality: 0.8,
+        });
 
     if (!resultadoFoto.canceled) {
       setFotoUri(
         resultadoFoto.assets[0].uri
       );
 
-      setOrigemFoto("camera");
+      setOrigemFoto(
+        "camera"
+      );
 
-      // Se trocar a foto, a análise anterior
-      // deixa de ser válida.
-      setResultado(null);
+      setResultado(
+        null
+      );
     }
   }
+
 
   // =========================================================
   // GALERIA
@@ -104,7 +187,8 @@ export default function AnaliseScreen() {
 
   async function selecionarFoto() {
     const permissao =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+      await ImagePicker
+        .requestMediaLibraryPermissionsAsync();
 
     if (!permissao.granted) {
       mostrarMensagem(
@@ -116,22 +200,28 @@ export default function AnaliseScreen() {
     }
 
     const resultadoFoto =
-      await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: true,
-        quality: 0.8,
-      });
+      await ImagePicker
+        .launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          allowsEditing: true,
+          quality: 0.8,
+        });
 
     if (!resultadoFoto.canceled) {
       setFotoUri(
         resultadoFoto.assets[0].uri
       );
 
-      setOrigemFoto("galeria");
+      setOrigemFoto(
+        "galeria"
+      );
 
-      setResultado(null);
+      setResultado(
+        null
+      );
     }
   }
+
 
   // =========================================================
   // GPS
@@ -139,12 +229,17 @@ export default function AnaliseScreen() {
 
   async function capturarLocalizacao() {
     try {
-      setBuscandoLocalizacao(true);
+      setBuscandoLocalizacao(
+        true
+      );
 
       const { status } =
-        await Location.requestForegroundPermissionsAsync();
+        await Location
+          .requestForegroundPermissionsAsync();
 
-      if (status !== "granted") {
+      if (
+        status !== "granted"
+      ) {
         mostrarMensagem(
           "Permissão necessária",
           "O VerdeScan precisa da localização para registrar onde a análise foi realizada."
@@ -154,12 +249,11 @@ export default function AnaliseScreen() {
       }
 
       const posicao =
-        await Location.getCurrentPositionAsync(
-          {
+        await Location
+          .getCurrentPositionAsync({
             accuracy:
               Location.Accuracy.High,
-          }
-        );
+          });
 
       setLocalizacao({
         latitude:
@@ -171,19 +265,28 @@ export default function AnaliseScreen() {
         precisao:
           posicao.coords.accuracy,
       });
+
+      setResultado(
+        null
+      );
+
     } catch (erro) {
-      console.error(erro);
+      console.error(
+        erro
+      );
 
       mostrarMensagem(
         "Erro de localização",
         "Não foi possível obter sua localização."
       );
+
     } finally {
       setBuscandoLocalizacao(
         false
       );
     }
   }
+
 
   // =========================================================
   // MENSAGENS
@@ -193,7 +296,9 @@ export default function AnaliseScreen() {
     titulo: string,
     mensagem: string
   ) {
-    if (Platform.OS === "web") {
+    if (
+      Platform.OS === "web"
+    ) {
       alert(
         `${titulo}\n\n${mensagem}`
       );
@@ -207,17 +312,22 @@ export default function AnaliseScreen() {
     );
   }
 
+
   // =========================================================
   // VALIDAR KM
   // =========================================================
 
   function obterKmNumerico() {
     const kmNormalizado =
-      km.replace(",", ".");
+      km.replace(
+        ",",
+        "."
+      );
 
-    const valor = Number(
-      kmNormalizado
-    );
+    const valor =
+      Number(
+        kmNormalizado
+      );
 
     if (
       Number.isNaN(valor) ||
@@ -229,8 +339,205 @@ export default function AnaliseScreen() {
     return valor;
   }
 
+
   // =========================================================
-  // ANALISAR
+  // DESCOBRIR TIPO DA IMAGEM
+  // =========================================================
+
+  function obterMimeType(
+    uri: string
+  ) {
+    const endereco =
+      uri.toLowerCase();
+
+    if (
+      endereco.includes(
+        ".png"
+      )
+    ) {
+      return "image/png";
+    }
+
+    if (
+      endereco.includes(
+        ".webp"
+      )
+    ) {
+      return "image/webp";
+    }
+
+    return "image/jpeg";
+  }
+
+
+  // =========================================================
+  // CRIAR NOME DO ARQUIVO
+  // =========================================================
+
+  function obterNomeArquivo(
+    uri: string
+  ) {
+    const partes =
+      uri.split("/");
+
+    const ultimo =
+      partes[
+        partes.length - 1
+      ];
+
+    if (
+      ultimo &&
+      ultimo.includes(".")
+    ) {
+      return ultimo;
+    }
+
+    return `verdescan_${Date.now()}.jpg`;
+  }
+
+
+  // =========================================================
+  // ENVIAR FOTO PARA API
+  // =========================================================
+
+  async function enviarFotoParaAPI(
+    uri: string
+  ): Promise<RespostaAPI> {
+    const formData =
+      new FormData();
+
+    const nomeArquivo =
+      obterNomeArquivo(
+        uri
+      );
+
+    const mimeType =
+      obterMimeType(
+        uri
+      );
+
+
+    // -------------------------------------------------------
+    // WEB
+    // -------------------------------------------------------
+
+    if (
+      Platform.OS === "web"
+    ) {
+      const respostaArquivo =
+        await fetch(
+          uri
+        );
+
+      const blob =
+        await respostaArquivo
+          .blob();
+
+      formData.append(
+        "imagem",
+        blob,
+        nomeArquivo
+      );
+
+    } else {
+
+      // -----------------------------------------------------
+      // IPHONE / ANDROID
+      // -----------------------------------------------------
+
+      formData.append(
+        "imagem",
+        {
+          uri,
+          name:
+            nomeArquivo,
+          type:
+            mimeType,
+        } as any
+      );
+    }
+
+
+    // Timeout de 2 minutos.
+    // Como os modelos estão rodando
+    // pela CPU do notebook,
+    // a primeira análise pode demorar.
+
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(
+        () => {
+          controller.abort();
+        },
+        120000
+      );
+
+
+    try {
+      const resposta =
+        await fetch(
+          API_URL,
+          {
+            method: "POST",
+
+            body:
+              formData,
+
+            signal:
+              controller.signal,
+
+            headers: {
+              Accept:
+                "application/json",
+            },
+          }
+        );
+
+
+      if (
+        !resposta.ok
+      ) {
+        let detalhe =
+          "Erro desconhecido";
+
+        try {
+          const erroJson =
+            await resposta.json();
+
+          detalhe =
+            erroJson.detail ??
+            JSON.stringify(
+              erroJson
+            );
+
+        } catch {
+          detalhe =
+            await resposta.text();
+        }
+
+        throw new Error(
+          `API ${resposta.status}: ${detalhe}`
+        );
+      }
+
+
+      const dados =
+        await resposta.json();
+
+      return dados;
+
+    } finally {
+      clearTimeout(
+        timeout
+      );
+    }
+  }
+
+
+  // =========================================================
+  // ANALISAR OCORRÊNCIA
   // =========================================================
 
   async function analisarOcorrencia() {
@@ -243,6 +550,7 @@ export default function AnaliseScreen() {
       return;
     }
 
+
     if (!localizacao) {
       mostrarMensagem(
         "Localização necessária",
@@ -252,7 +560,10 @@ export default function AnaliseScreen() {
       return;
     }
 
-    if (!rodovia.trim()) {
+
+    if (
+      !rodovia.trim()
+    ) {
       mostrarMensagem(
         "Rodovia necessária",
         "Informe a rodovia onde a análise está sendo realizada."
@@ -261,10 +572,13 @@ export default function AnaliseScreen() {
       return;
     }
 
+
     const kmNumerico =
       obterKmNumerico();
 
-    if (kmNumerico === null) {
+    if (
+      kmNumerico === null
+    ) {
       mostrarMensagem(
         "KM inválido",
         "Informe um KM válido."
@@ -273,28 +587,192 @@ export default function AnaliseScreen() {
       return;
     }
 
-    /*
-      =======================================================
-      PRÓXIMO PASSO:
-      AQUI VAMOS ENVIAR fotoUri PARA A API DO VERDESCAN.
 
-      Exemplo futuro:
+    try {
+      setAnalisando(
+        true
+      );
 
-      const resposta = await analisarImagemAPI(fotoUri);
+      setResultado(
+        null
+      );
+
+
+      // =====================================================
+      // CHAMADA REAL DA API
+      // =====================================================
+
+      const resposta =
+        await enviarFotoParaAPI(
+          fotoUri
+        );
+
+
+      console.log(
+        "Resposta VerdeScan API:",
+        resposta
+      );
+
+
+      // =====================================================
+      // CASO INCONCLUSIVO
+      // =====================================================
+
+      if (
+        resposta.status ===
+          "inconclusivo" ||
+        resposta.classe ===
+          "INCONCLUSIVO"
+      ) {
+        setResultado({
+          classe:
+            "INCONCLUSIVO",
+
+          confianca:
+            0,
+
+          vegetacaoTotal:
+            resposta
+              .vegetacao_total ??
+            0,
+
+          vegetacaoBaixa:
+            resposta
+              .vegetacao_baixa ??
+            0,
+
+          vegetacaoAlta:
+            resposta
+              .vegetacao_alta ??
+            0,
+
+          patchesAnalisados:
+            resposta
+              .patches_analisados ??
+            0,
+
+          probabilidadeNormal:
+            0,
+
+          probabilidadeAtencao:
+            0,
+
+          probabilidadeCritico:
+            0,
+        });
+
+
+        mostrarMensagem(
+          "Análise inconclusiva",
+          "A inteligência artificial não encontrou vegetação suficiente para realizar uma classificação confiável. Tente tirar outra foto mais próxima da vegetação."
+        );
+
+        return;
+      }
+
+
+      // =====================================================
+      // VALIDAR CLASSE
+      // =====================================================
+
+      if (
+        resposta.classe !==
+          "NORMAL" &&
+        resposta.classe !==
+          "ATENCAO" &&
+        resposta.classe !==
+          "CRITICO"
+      ) {
+        throw new Error(
+          "A API retornou uma classe inválida."
+        );
+      }
+
+
+      // =====================================================
+      // SALVAR RESULTADO NA TELA
+      // =====================================================
 
       setResultado({
-        classe: resposta.classe,
-        confianca: resposta.confianca,
+        classe:
+          resposta.classe,
+
+        confianca:
+          resposta.confianca,
+
+        vegetacaoTotal:
+          resposta
+            .vegetacao_total,
+
+        vegetacaoBaixa:
+          resposta
+            .vegetacao_baixa,
+
+        vegetacaoAlta:
+          resposta
+            .vegetacao_alta,
+
+        patchesAnalisados:
+          resposta
+            .patches_analisados,
+
+        probabilidadeNormal:
+          resposta
+            .probabilidades
+            ?.NORMAL ??
+          0,
+
+        probabilidadeAtencao:
+          resposta
+            .probabilidades
+            ?.ATENCAO ??
+          0,
+
+        probabilidadeCritico:
+          resposta
+            .probabilidades
+            ?.CRITICO ??
+          0,
       });
 
-      =======================================================
-    */
 
-    mostrarMensagem(
-      "Dados preparados",
-      "Foto, GPS, rodovia e KM estão prontos. No próximo passo vamos conectar esta tela à API da inteligência artificial."
-    );
+    } catch (erro: any) {
+      console.error(
+        "Erro na análise:",
+        erro
+      );
+
+
+      let mensagem =
+        "Não foi possível analisar a imagem.";
+
+      if (
+        erro?.name ===
+        "AbortError"
+      ) {
+        mensagem =
+          "A análise demorou mais que o esperado. Verifique se a API está rodando no notebook e tente novamente.";
+
+      } else if (
+        erro?.message
+      ) {
+        mensagem =
+          erro.message;
+      }
+
+
+      mostrarMensagem(
+        "Erro na análise",
+        mensagem
+      );
+
+    } finally {
+      setAnalisando(
+        false
+      );
+    }
   }
+
 
   // =========================================================
   // SALVAR OCORRÊNCIA
@@ -309,84 +787,137 @@ export default function AnaliseScreen() {
       return;
     }
 
-    const kmNumerico =
-      obterKmNumerico();
 
-    if (kmNumerico === null) {
+    if (
+      resultado.classe ===
+      "INCONCLUSIVO"
+    ) {
+      mostrarMensagem(
+        "Análise inconclusiva",
+        "Uma análise inconclusiva não pode ser salva como ocorrência."
+      );
+
       return;
     }
 
+
+    const kmNumerico =
+      obterKmNumerico();
+
+    if (
+      kmNumerico === null
+    ) {
+      return;
+    }
+
+
     try {
-      setSalvando(true);
+      setSalvando(
+        true
+      );
+
 
       const novaOcorrencia: Ocorrencia =
         {
-          id: `${Date.now()}`,
+          id:
+            `${Date.now()}`,
 
           data:
-            new Date().toISOString(),
+            new Date()
+              .toISOString(),
 
           rodovia:
             rodovia
               .trim()
               .toUpperCase(),
 
-          km: kmNumerico,
+          km:
+            kmNumerico,
 
           latitude:
-            localizacao.latitude,
+            localizacao
+              .latitude,
 
           longitude:
-            localizacao.longitude,
+            localizacao
+              .longitude,
 
           classe:
-            resultado.classe,
+            resultado
+              .classe,
 
           confianca:
-            resultado.confianca,
+            resultado
+              .confianca,
 
-          status: "PENDENTE",
+          status:
+            "PENDENTE",
 
-          imagem: fotoUri,
+          imagem:
+            fotoUri,
         };
+
 
       await adicionarOcorrencia(
         novaOcorrencia
       );
+
 
       mostrarMensagem(
         "Ocorrência salva",
         "A análise foi registrada com sucesso."
       );
 
+
       router.replace(
         "/prioridades"
       );
+
     } catch (erro) {
-      console.error(erro);
+      console.error(
+        erro
+      );
 
       mostrarMensagem(
         "Erro",
         "Não foi possível salvar a ocorrência."
       );
+
     } finally {
-      setSalvando(false);
+      setSalvando(
+        false
+      );
     }
   }
 
+
   // =========================================================
-  // CONTROLE DO BOTÃO
+  // CONTROLE DOS BOTÕES
   // =========================================================
 
   const kmValido =
-    obterKmNumerico() !== null;
+    obterKmNumerico() !==
+    null;
+
 
   const podeAnalisar =
     fotoUri !== null &&
     localizacao !== null &&
-    rodovia.trim().length > 0 &&
-    km.trim().length > 0 &&
-    kmValido;
+    rodovia
+      .trim()
+      .length > 0 &&
+    km
+      .trim()
+      .length > 0 &&
+    kmValido &&
+    !analisando;
+
+
+  const resultadoValido =
+    resultado !== null &&
+    resultado.classe !==
+      "INCONCLUSIVO";
+
 
   // =========================================================
   // INTERFACE
@@ -394,63 +925,97 @@ export default function AnaliseScreen() {
 
   return (
     <SafeAreaView
-      style={styles.container}
+      style={
+        styles.container
+      }
     >
       <ScrollView
         contentContainerStyle={
           styles.content
         }
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps=
+          "handled"
       >
-        {/* HEADER */}
 
-        <View style={styles.header}>
+        {/* ==================================================
+            HEADER
+        ================================================== */}
+
+        <View
+          style={
+            styles.header
+          }
+        >
           <TouchableOpacity
             onPress={() =>
               router.back()
             }
           >
             <Text
-              style={styles.backButton}
+              style={
+                styles.backButton
+              }
             >
               ‹ Voltar
             </Text>
           </TouchableOpacity>
 
-          <Text style={styles.title}>
+
+          <Text
+            style={
+              styles.title
+            }
+          >
             Nova análise
           </Text>
 
+
           <Text
-            style={styles.subtitle}
+            style={
+              styles.subtitle
+            }
           >
-            Registre uma nova ocorrência
-            de vegetação
+            Registre uma nova
+            ocorrência de vegetação
           </Text>
         </View>
 
-        {/* ===============================================
-            1. FOTO
-        =============================================== */}
 
-        <View style={styles.section}>
+        {/* ==================================================
+            1. FOTO
+        ================================================== */}
+
+        <View
+          style={
+            styles.section
+          }
+        >
           <Text
-            style={styles.sectionTitle}
+            style={
+              styles.sectionTitle
+            }
           >
             1. Foto da vegetação
           </Text>
 
-          <View style={styles.card}>
+
+          <View
+            style={
+              styles.card
+            }
+          >
             {fotoUri ? (
               <>
                 <Image
                   source={{
-                    uri: fotoUri,
+                    uri:
+                      fotoUri,
                   }}
                   style={
                     styles.previewImage
                   }
                 />
+
 
                 <View
                   style={
@@ -472,6 +1037,7 @@ export default function AnaliseScreen() {
                   </Text>
                 </View>
 
+
                 <Text
                   style={
                     styles.photoOrigin
@@ -483,11 +1049,17 @@ export default function AnaliseScreen() {
                     : "Imagem selecionada da galeria"}
                 </Text>
 
+
                 <TouchableOpacity
                   style={
                     styles.primaryPhotoButton
                   }
-                  onPress={tirarFoto}
+                  onPress={
+                    tirarFoto
+                  }
+                  disabled={
+                    analisando
+                  }
                 >
                   <Text
                     style={
@@ -498,6 +1070,7 @@ export default function AnaliseScreen() {
                   </Text>
                 </TouchableOpacity>
 
+
                 <TouchableOpacity
                   style={
                     styles.secondaryButton
@@ -505,23 +1078,31 @@ export default function AnaliseScreen() {
                   onPress={
                     selecionarFoto
                   }
+                  disabled={
+                    analisando
+                  }
                 >
                   <Text
                     style={
                       styles.secondaryButtonText
                     }
                   >
-                    Escolher outra da galeria
+                    Escolher outra da
+                    galeria
                   </Text>
                 </TouchableOpacity>
               </>
+
             ) : (
               <>
                 <Text
-                  style={styles.icon}
+                  style={
+                    styles.icon
+                  }
                 >
                   📷
                 </Text>
+
 
                 <Text
                   style={
@@ -530,6 +1111,7 @@ export default function AnaliseScreen() {
                 >
                   Registre a vegetação
                 </Text>
+
 
                 <Text
                   style={
@@ -542,11 +1124,14 @@ export default function AnaliseScreen() {
                   a análise.
                 </Text>
 
+
                 <TouchableOpacity
                   style={
                     styles.primaryPhotoButton
                   }
-                  onPress={tirarFoto}
+                  onPress={
+                    tirarFoto
+                  }
                 >
                   <Text
                     style={
@@ -556,6 +1141,7 @@ export default function AnaliseScreen() {
                     Tirar foto agora
                   </Text>
                 </TouchableOpacity>
+
 
                 <TouchableOpacity
                   style={
@@ -578,25 +1164,40 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
-        {/* ===============================================
-            2. LOCALIZAÇÃO
-        =============================================== */}
 
-        <View style={styles.section}>
+        {/* ==================================================
+            2. LOCALIZAÇÃO
+        ================================================== */}
+
+        <View
+          style={
+            styles.section
+          }
+        >
           <Text
-            style={styles.sectionTitle}
+            style={
+              styles.sectionTitle
+            }
           >
             2. Localização GPS
           </Text>
 
-          <View style={styles.card}>
+
+          <View
+            style={
+              styles.card
+            }
+          >
             {!localizacao ? (
               <>
                 <Text
-                  style={styles.icon}
+                  style={
+                    styles.icon
+                  }
                 >
                   📍
                 </Text>
+
 
                 <Text
                   style={
@@ -607,6 +1208,7 @@ export default function AnaliseScreen() {
                   capturada
                 </Text>
 
+
                 <Text
                   style={
                     styles.cardText
@@ -616,6 +1218,7 @@ export default function AnaliseScreen() {
                   latitude, longitude e
                   precisão do GPS.
                 </Text>
+
 
                 <TouchableOpacity
                   style={
@@ -647,6 +1250,7 @@ export default function AnaliseScreen() {
                         Obtendo localização...
                       </Text>
                     </View>
+
                   ) : (
                     <Text
                       style={
@@ -658,6 +1262,7 @@ export default function AnaliseScreen() {
                   )}
                 </TouchableOpacity>
               </>
+
             ) : (
               <>
                 <View
@@ -679,6 +1284,7 @@ export default function AnaliseScreen() {
                     Localização capturada
                   </Text>
                 </View>
+
 
                 <View
                   style={
@@ -709,11 +1315,13 @@ export default function AnaliseScreen() {
                     </Text>
                   </View>
 
+
                   <View
                     style={
                       styles.locationDivider
                     }
                   />
+
 
                   <View
                     style={
@@ -739,6 +1347,7 @@ export default function AnaliseScreen() {
                     </Text>
                   </View>
                 </View>
+
 
                 <View
                   style={
@@ -767,12 +1376,16 @@ export default function AnaliseScreen() {
                   </Text>
                 </View>
 
+
                 <TouchableOpacity
                   style={
                     styles.secondaryButton
                   }
                   onPress={
                     capturarLocalizacao
+                  }
+                  disabled={
+                    analisando
                   }
                 >
                   <Text
@@ -788,16 +1401,24 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
-        {/* ===============================================
-            3. RODOVIA E KM
-        =============================================== */}
 
-        <View style={styles.section}>
+        {/* ==================================================
+            3. RODOVIA E KM
+        ================================================== */}
+
+        <View
+          style={
+            styles.section
+          }
+        >
           <Text
-            style={styles.sectionTitle}
+            style={
+              styles.sectionTitle
+            }
           >
             3. Trecho da rodovia
           </Text>
+
 
           <View
             style={[
@@ -806,22 +1427,43 @@ export default function AnaliseScreen() {
             ]}
           >
             <Text
-              style={styles.inputLabel}
+              style={
+                styles.inputLabel
+              }
             >
               Rodovia
             </Text>
 
+
             <TextInput
-              style={styles.input}
-              value={rodovia}
-              onChangeText={(texto) => {
-                setRodovia(texto);
-                setResultado(null);
+              style={
+                styles.input
+              }
+              value={
+                rodovia
+              }
+              onChangeText={(
+                texto
+              ) => {
+                setRodovia(
+                  texto
+                );
+
+                setResultado(
+                  null
+                );
               }}
-              placeholder="Ex.: SP-330"
-              placeholderTextColor="#9AA39C"
-              autoCapitalize="characters"
+              placeholder=
+                "Ex.: SP-330"
+              placeholderTextColor=
+                "#9AA39C"
+              autoCapitalize=
+                "characters"
+              editable={
+                !analisando
+              }
             />
+
 
             <Text
               style={[
@@ -832,20 +1474,41 @@ export default function AnaliseScreen() {
               KM
             </Text>
 
+
             <TextInput
-              style={styles.input}
-              value={km}
-              onChangeText={(texto) => {
-                setKm(texto);
-                setResultado(null);
+              style={
+                styles.input
+              }
+              value={
+                km
+              }
+              onChangeText={(
+                texto
+              ) => {
+                setKm(
+                  texto
+                );
+
+                setResultado(
+                  null
+                );
               }}
-              placeholder="Ex.: 105"
-              placeholderTextColor="#9AA39C"
-              keyboardType="decimal-pad"
+              placeholder=
+                "Ex.: 105"
+              placeholderTextColor=
+                "#9AA39C"
+              keyboardType=
+                "decimal-pad"
+              editable={
+                !analisando
+              }
             />
 
+
             <Text
-              style={styles.fieldHelp}
+              style={
+                styles.fieldHelp
+              }
             >
               Essas informações serão
               utilizadas no mapa, na lista
@@ -855,20 +1518,74 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
-        {/* ===============================================
-            4. CLASSIFICAÇÃO
-        =============================================== */}
 
-        <View style={styles.section}>
+        {/* ==================================================
+            4. CLASSIFICAÇÃO
+        ================================================== */}
+
+        <View
+          style={
+            styles.section
+          }
+        >
           <Text
-            style={styles.sectionTitle}
+            style={
+              styles.sectionTitle
+            }
           >
             4. Classificação
           </Text>
 
-          <View style={styles.card}>
-            {resultado ? (
+
+          <View
+            style={
+              styles.card
+            }
+          >
+
+            {/* CARREGANDO */}
+
+            {analisando ? (
               <>
+                <ActivityIndicator
+                  size="large"
+                  color="#21894A"
+                />
+
+                <Text
+                  style={
+                    styles.analyzingTitle
+                  }
+                >
+                  Analisando imagem...
+                </Text>
+
+                <Text
+                  style={
+                    styles.cardText
+                  }
+                >
+                  A imagem está sendo
+                  processada pelos modelos
+                  de segmentação e
+                  classificação.
+                </Text>
+
+                <Text
+                  style={
+                    styles.processingText
+                  }
+                >
+                  Isso pode levar alguns
+                  segundos.
+                </Text>
+              </>
+
+            ) : resultado ? (
+              <>
+
+                {/* RESULTADO */}
+
                 <Text
                   style={
                     styles.resultLabel
@@ -876,6 +1593,7 @@ export default function AnaliseScreen() {
                 >
                   Resultado da análise
                 </Text>
+
 
                 <View
                   style={[
@@ -885,9 +1603,12 @@ export default function AnaliseScreen() {
                     "CRITICO"
                       ? styles.resultCritical
                       : resultado.classe ===
-                          "ATENCAO"
+                        "ATENCAO"
                         ? styles.resultAttention
-                        : styles.resultNormal,
+                        : resultado.classe ===
+                          "NORMAL"
+                          ? styles.resultNormal
+                          : styles.resultInconclusive,
                   ]}
                 >
                   <Text
@@ -895,27 +1616,228 @@ export default function AnaliseScreen() {
                       styles.resultBadgeText
                     }
                   >
-                    {
-                      resultado.classe
-                    }
+                    {resultado.classe ===
+                    "ATENCAO"
+                      ? "ATENÇÃO"
+                      : resultado.classe ===
+                        "CRITICO"
+                        ? "CRÍTICO"
+                        : resultado.classe}
                   </Text>
                 </View>
 
-                <Text
+
+                {resultado.classe !==
+                  "INCONCLUSIVO" && (
+                  <Text
+                    style={
+                      styles.resultConfidence
+                    }
+                  >
+                    Confiança:{" "}
+                    {(
+                      resultado.confianca *
+                      100
+                    ).toFixed(
+                      2
+                    )}
+                    %
+                  </Text>
+                )}
+
+
+                {/* DADOS SEGMENTAÇÃO */}
+
+                <View
                   style={
-                    styles.resultConfidence
+                    styles.aiDetails
                   }
                 >
-                  Confiança:{" "}
-                  {(
-                    resultado.confianca *
-                    100
-                  ).toFixed(2)}
-                  %
-                </Text>
+                  <Text
+                    style={
+                      styles.aiDetailsTitle
+                    }
+                  >
+                    Detalhes da análise
+                  </Text>
+
+
+                  <View
+                    style={
+                      styles.aiDetailRow
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.aiDetailLabel
+                      }
+                    >
+                      Vegetação detectada
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.aiDetailValue
+                      }
+                    >
+                      {resultado.vegetacaoTotal.toFixed(
+                        2
+                      )}
+                      %
+                    </Text>
+                  </View>
+
+
+                  <View
+                    style={
+                      styles.aiDetailRow
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.aiDetailLabel
+                      }
+                    >
+                      Vegetação baixa
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.aiDetailValue
+                      }
+                    >
+                      {resultado.vegetacaoBaixa.toFixed(
+                        2
+                      )}
+                      %
+                    </Text>
+                  </View>
+
+
+                  <View
+                    style={
+                      styles.aiDetailRow
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.aiDetailLabel
+                      }
+                    >
+                      Vegetação alta
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.aiDetailValue
+                      }
+                    >
+                      {resultado.vegetacaoAlta.toFixed(
+                        2
+                      )}
+                      %
+                    </Text>
+                  </View>
+
+
+                  <View
+                    style={
+                      styles.aiDetailRow
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.aiDetailLabel
+                      }
+                    >
+                      Regiões analisadas
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.aiDetailValue
+                      }
+                    >
+                      {resultado.patchesAnalisados}
+                    </Text>
+                  </View>
+                </View>
+
+
+                {/* PROBABILIDADES */}
+
+                {resultado.classe !==
+                  "INCONCLUSIVO" && (
+                  <View
+                    style={
+                      styles.probabilityBox
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.aiDetailsTitle
+                      }
+                    >
+                      Probabilidades
+                    </Text>
+
+
+                    <Text
+                      style={
+                        styles.probabilityText
+                      }
+                    >
+                      Normal:{" "}
+                      {(
+                        resultado.probabilidadeNormal *
+                        100
+                      ).toFixed(
+                        2
+                      )}
+                      %
+                    </Text>
+
+
+                    <Text
+                      style={
+                        styles.probabilityText
+                      }
+                    >
+                      Atenção:{" "}
+                      {(
+                        resultado.probabilidadeAtencao *
+                        100
+                      ).toFixed(
+                        2
+                      )}
+                      %
+                    </Text>
+
+
+                    <Text
+                      style={
+                        styles.probabilityText
+                      }
+                    >
+                      Crítico:{" "}
+                      {(
+                        resultado.probabilidadeCritico *
+                        100
+                      ).toFixed(
+                        2
+                      )}
+                      %
+                    </Text>
+                  </View>
+                )}
+
               </>
+
             ) : (
               <>
+
+                {/* AGUARDANDO */}
+
                 <Text
                   style={
                     styles.cardTitle
@@ -923,6 +1845,7 @@ export default function AnaliseScreen() {
                 >
                   Aguardando análise
                 </Text>
+
 
                 <Text
                   style={
@@ -934,6 +1857,7 @@ export default function AnaliseScreen() {
                   acordo com a vegetação
                   identificada na imagem.
                 </Text>
+
 
                 <View
                   style={
@@ -961,6 +1885,7 @@ export default function AnaliseScreen() {
                     </Text>
                   </View>
 
+
                   <View
                     style={
                       styles.statusItem
@@ -981,6 +1906,7 @@ export default function AnaliseScreen() {
                       Atenção
                     </Text>
                   </View>
+
 
                   <View
                     style={
@@ -1004,6 +1930,7 @@ export default function AnaliseScreen() {
                   </View>
                 </View>
 
+
                 <Text
                   style={
                     styles.heightRules
@@ -1019,9 +1946,10 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
-        {/* ===============================================
-            ANALISAR
-        =============================================== */}
+
+        {/* ==================================================
+            BOTÃO ANALISAR
+        ================================================== */}
 
         {!resultado && (
           <TouchableOpacity
@@ -1029,7 +1957,7 @@ export default function AnaliseScreen() {
               styles.analyzeButton,
 
               !podeAnalisar &&
-                styles.analyzeButtonDisabled,
+              styles.analyzeButtonDisabled,
             ]}
             disabled={
               !podeAnalisar
@@ -1038,21 +1966,45 @@ export default function AnaliseScreen() {
               analisarOcorrencia
             }
           >
-            <Text
-              style={
-                styles.analyzeButtonText
-              }
-            >
-              Analisar ocorrência
-            </Text>
+
+            {analisando ? (
+              <View
+                style={
+                  styles.loadingRow
+                }
+              >
+                <ActivityIndicator
+                  color="#FFFFFF"
+                />
+
+                <Text
+                  style={
+                    styles.analyzeButtonText
+                  }
+                >
+                  Analisando...
+                </Text>
+              </View>
+
+            ) : (
+              <Text
+                style={
+                  styles.analyzeButtonText
+                }
+              >
+                Analisar ocorrência
+              </Text>
+            )}
+
           </TouchableOpacity>
         )}
 
-        {/* ===============================================
-            SALVAR
-        =============================================== */}
 
-        {resultado && (
+        {/* ==================================================
+            SALVAR
+        ================================================== */}
+
+        {resultadoValido && (
           <TouchableOpacity
             style={
               styles.saveButton
@@ -1060,12 +2012,15 @@ export default function AnaliseScreen() {
             onPress={
               salvarOcorrencia
             }
-            disabled={salvando}
+            disabled={
+              salvando
+            }
           >
             {salvando ? (
               <ActivityIndicator
                 color="#FFFFFF"
               />
+
             ) : (
               <Text
                 style={
@@ -1078,12 +2033,45 @@ export default function AnaliseScreen() {
           </TouchableOpacity>
         )}
 
-        {/* AJUDA */}
+
+        {/* ==================================================
+            REFAZER INCONCLUSIVO
+        ================================================== */}
+
+        {resultado?.classe ===
+          "INCONCLUSIVO" && (
+          <TouchableOpacity
+            style={
+              styles.retryButton
+            }
+            onPress={() => {
+              setResultado(
+                null
+              );
+            }}
+          >
+            <Text
+              style={
+                styles.retryButtonText
+              }
+            >
+              Tentar outra análise
+            </Text>
+          </TouchableOpacity>
+        )}
+
+
+        {/* ==================================================
+            AJUDA
+        ================================================== */}
 
         {!podeAnalisar &&
-          !resultado && (
+          !resultado &&
+          !analisando && (
             <Text
-              style={styles.helpText}
+              style={
+                styles.helpText
+              }
             >
               Registre uma foto, capture
               sua localização e informe a
@@ -1092,379 +2080,739 @@ export default function AnaliseScreen() {
             </Text>
           )}
 
+
         {podeAnalisar &&
-          !resultado && (
+          !resultado &&
+          !analisando && (
             <Text
-              style={styles.readyText}
+              style={
+                styles.readyText
+              }
             >
               Todos os dados foram
               preenchidos. A ocorrência
               está pronta para análise.
             </Text>
           )}
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ===========================================================
+
+// ============================================================
 // ESTILOS
-// ===========================================================
+// ============================================================
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F4F7F4",
-  },
+const styles =
+  StyleSheet.create({
 
-  content: {
-    paddingBottom: 50,
-  },
+    container: {
+      flex: 1,
+      backgroundColor:
+        "#F4F7F4",
+    },
 
-  header: {
-    backgroundColor: "#164B2A",
-    paddingHorizontal: 20,
-    paddingTop: 28,
-    paddingBottom: 26,
-  },
+    content: {
+      paddingBottom: 50,
+    },
 
-  backButton: {
-    color: "#D8E7DC",
-    fontSize: 16,
-    marginBottom: 16,
-  },
+    header: {
+      backgroundColor:
+        "#164B2A",
 
-  title: {
-    color: "#FFFFFF",
-    fontSize: 26,
-    fontWeight: "bold",
-  },
+      paddingHorizontal: 20,
 
-  subtitle: {
-    marginTop: 5,
-    fontSize: 14,
-    color: "#D8E7DC",
-  },
+      paddingTop: 28,
 
-  section: {
-    marginTop: 24,
-    paddingHorizontal: 20,
-  },
+      paddingBottom: 26,
+    },
 
-  sectionTitle: {
-    fontSize: 19,
-    fontWeight: "bold",
-    color: "#1D2A21",
-    marginBottom: 12,
-  },
+    backButton: {
+      color:
+        "#D8E7DC",
 
-  card: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 24,
-    alignItems: "center",
-  },
+      fontSize: 16,
 
-  formCard: {
-    alignItems: "stretch",
-  },
+      marginBottom: 16,
+    },
 
-  icon: {
-    fontSize: 38,
-    marginBottom: 12,
-  },
+    title: {
+      color:
+        "#FFFFFF",
 
-  cardTitle: {
-    fontSize: 17,
-    fontWeight: "bold",
-    color: "#1D2A21",
-    textAlign: "center",
-  },
+      fontSize: 26,
 
-  cardText: {
-    marginTop: 7,
-    fontSize: 14,
-    color: "#667168",
-    textAlign: "center",
-    lineHeight: 20,
-  },
+      fontWeight:
+        "bold",
+    },
 
-  previewImage: {
-    width: "100%",
-    height: 220,
-    borderRadius: 12,
-    marginBottom: 14,
-  },
+    subtitle: {
+      marginTop: 5,
 
-  successRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+      fontSize: 14,
 
-  successPoint: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#21894A",
-    marginRight: 7,
-  },
+      color:
+        "#D8E7DC",
+    },
 
-  successText: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: "#21894A",
-  },
+    section: {
+      marginTop: 24,
 
-  photoOrigin: {
-    fontSize: 12,
-    color: "#6B756E",
-    marginTop: 5,
-  },
+      paddingHorizontal: 20,
+    },
 
-  primaryPhotoButton: {
-    marginTop: 18,
-    backgroundColor: "#21894A",
-    borderRadius: 10,
-    paddingVertical: 13,
-    paddingHorizontal: 28,
-    minWidth: 210,
-    alignItems: "center",
-  },
+    sectionTitle: {
+      fontSize: 19,
 
-  primaryPhotoButtonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "bold",
-  },
+      fontWeight:
+        "bold",
 
-  secondaryButton: {
-    marginTop: 12,
-    backgroundColor: "#E5F2E9",
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    minWidth: 190,
-    alignItems: "center",
-  },
+      color:
+        "#1D2A21",
 
-  secondaryButtonText: {
-    color: "#21894A",
-    fontSize: 15,
-    fontWeight: "bold",
-  },
+      marginBottom: 12,
+    },
 
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
+    card: {
+      backgroundColor:
+        "#FFFFFF",
 
-  locationData: {
-    flexDirection: "row",
-    width: "100%",
-    backgroundColor: "#F4F7F4",
-    borderRadius: 12,
-    paddingVertical: 16,
-    marginTop: 18,
-  },
+      borderRadius: 16,
 
-  locationItem: {
-    flex: 1,
-    alignItems: "center",
-  },
+      padding: 24,
 
-  locationDivider: {
-    width: 1,
-    backgroundColor: "#D5DDD7",
-  },
+      alignItems:
+        "center",
+    },
 
-  locationLabel: {
-    fontSize: 12,
-    color: "#6B756E",
-  },
+    formCard: {
+      alignItems:
+        "stretch",
+    },
 
-  locationValue: {
-    marginTop: 5,
-    fontSize: 15,
-    fontWeight: "bold",
-    color: "#1D2A21",
-  },
+    icon: {
+      fontSize: 38,
 
-  accuracyBox: {
-    marginTop: 12,
-    alignItems: "center",
-  },
+      marginBottom: 12,
+    },
 
-  accuracyLabel: {
-    fontSize: 12,
-    color: "#6B756E",
-  },
+    cardTitle: {
+      fontSize: 17,
 
-  accuracyValue: {
-    marginTop: 3,
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1D2A21",
-  },
+      fontWeight:
+        "bold",
 
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#1D2A21",
-    marginBottom: 7,
-  },
+      color:
+        "#1D2A21",
 
-  secondInputLabel: {
-    marginTop: 18,
-  },
+      textAlign:
+        "center",
+    },
 
-  input: {
-    width: "100%",
-    backgroundColor: "#F4F7F4",
-    borderWidth: 1,
-    borderColor: "#D8E0DA",
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    fontSize: 16,
-    color: "#1D2A21",
-  },
+    cardText: {
+      marginTop: 7,
 
-  fieldHelp: {
-    marginTop: 15,
-    fontSize: 12,
-    lineHeight: 18,
-    color: "#778078",
-  },
+      fontSize: 14,
 
-  statusRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    marginTop: 20,
-  },
+      color:
+        "#667168",
 
-  statusItem: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
+      textAlign:
+        "center",
 
-  statusPoint: {
-    width: 11,
-    height: 11,
-    borderRadius: 6,
-    marginRight: 6,
-  },
+      lineHeight: 20,
+    },
 
-  green: {
-    backgroundColor: "#2E9D50",
-  },
+    previewImage: {
+      width:
+        "100%",
 
-  yellow: {
-    backgroundColor: "#E0A82E",
-  },
+      height: 220,
 
-  red: {
-    backgroundColor: "#D63E3E",
-  },
+      borderRadius: 12,
 
-  statusLabel: {
-    fontSize: 13,
-    color: "#526157",
-  },
+      marginBottom: 14,
+    },
 
-  heightRules: {
-    marginTop: 20,
-    fontSize: 12,
-    color: "#778078",
-    textAlign: "center",
-    lineHeight: 19,
-  },
+    successRow: {
+      flexDirection:
+        "row",
 
-  analyzeButton: {
-    marginHorizontal: 20,
-    marginTop: 28,
-    backgroundColor: "#21894A",
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: "center",
-  },
+      alignItems:
+        "center",
+    },
 
-  analyzeButtonDisabled: {
-    backgroundColor: "#A7B6AA",
-  },
+    successPoint: {
+      width: 10,
 
-  analyzeButtonText: {
-    color: "#FFFFFF",
-    fontSize: 17,
-    fontWeight: "bold",
-  },
+      height: 10,
 
-  saveButton: {
-    marginHorizontal: 20,
-    marginTop: 28,
-    backgroundColor: "#164B2A",
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: "center",
-  },
+      borderRadius: 5,
 
-  saveButtonText: {
-    color: "#FFFFFF",
-    fontSize: 17,
-    fontWeight: "bold",
-  },
+      backgroundColor:
+        "#21894A",
 
-  helpText: {
-    marginHorizontal: 30,
-    marginTop: 12,
-    color: "#778078",
-    fontSize: 12,
-    textAlign: "center",
-  },
+      marginRight: 7,
+    },
 
-  readyText: {
-    marginHorizontal: 30,
-    marginTop: 12,
-    color: "#21894A",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
-  },
+    successText: {
+      fontSize: 15,
 
-  resultLabel: {
-    fontSize: 13,
-    color: "#6B756E",
-  },
+      fontWeight:
+        "bold",
 
-  resultBadge: {
-    marginTop: 12,
-    paddingHorizontal: 22,
-    paddingVertical: 10,
-    borderRadius: 24,
-  },
+      color:
+        "#21894A",
+    },
 
-  resultNormal: {
-    backgroundColor: "#2E9D50",
-  },
+    photoOrigin: {
+      fontSize: 12,
 
-  resultAttention: {
-    backgroundColor: "#E0A82E",
-  },
+      color:
+        "#6B756E",
 
-  resultCritical: {
-    backgroundColor: "#D63E3E",
-  },
+      marginTop: 5,
+    },
 
-  resultBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 18,
-    fontWeight: "bold",
-  },
+    primaryPhotoButton: {
+      marginTop: 18,
 
-  resultConfidence: {
-    marginTop: 10,
-    color: "#526157",
-    fontSize: 14,
-  },
-});
+      backgroundColor:
+        "#21894A",
+
+      borderRadius: 10,
+
+      paddingVertical: 13,
+
+      paddingHorizontal: 28,
+
+      minWidth: 210,
+
+      alignItems:
+        "center",
+    },
+
+    primaryPhotoButtonText: {
+      color:
+        "#FFFFFF",
+
+      fontSize: 15,
+
+      fontWeight:
+        "bold",
+    },
+
+    secondaryButton: {
+      marginTop: 12,
+
+      backgroundColor:
+        "#E5F2E9",
+
+      borderRadius: 10,
+
+      paddingVertical: 12,
+
+      paddingHorizontal: 24,
+
+      minWidth: 190,
+
+      alignItems:
+        "center",
+    },
+
+    secondaryButtonText: {
+      color:
+        "#21894A",
+
+      fontSize: 15,
+
+      fontWeight:
+        "bold",
+    },
+
+    loadingRow: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      gap: 8,
+    },
+
+    locationData: {
+      flexDirection:
+        "row",
+
+      width:
+        "100%",
+
+      backgroundColor:
+        "#F4F7F4",
+
+      borderRadius: 12,
+
+      paddingVertical: 16,
+
+      marginTop: 18,
+    },
+
+    locationItem: {
+      flex: 1,
+
+      alignItems:
+        "center",
+    },
+
+    locationDivider: {
+      width: 1,
+
+      backgroundColor:
+        "#D5DDD7",
+    },
+
+    locationLabel: {
+      fontSize: 12,
+
+      color:
+        "#6B756E",
+    },
+
+    locationValue: {
+      marginTop: 5,
+
+      fontSize: 15,
+
+      fontWeight:
+        "bold",
+
+      color:
+        "#1D2A21",
+    },
+
+    accuracyBox: {
+      marginTop: 12,
+
+      alignItems:
+        "center",
+    },
+
+    accuracyLabel: {
+      fontSize: 12,
+
+      color:
+        "#6B756E",
+    },
+
+    accuracyValue: {
+      marginTop: 3,
+
+      fontSize: 14,
+
+      fontWeight:
+        "600",
+
+      color:
+        "#1D2A21",
+    },
+
+    inputLabel: {
+      fontSize: 14,
+
+      fontWeight:
+        "bold",
+
+      color:
+        "#1D2A21",
+
+      marginBottom: 7,
+    },
+
+    secondInputLabel: {
+      marginTop: 18,
+    },
+
+    input: {
+      width:
+        "100%",
+
+      backgroundColor:
+        "#F4F7F4",
+
+      borderWidth: 1,
+
+      borderColor:
+        "#D8E0DA",
+
+      borderRadius: 10,
+
+      paddingHorizontal: 14,
+
+      paddingVertical: 13,
+
+      fontSize: 16,
+
+      color:
+        "#1D2A21",
+    },
+
+    fieldHelp: {
+      marginTop: 15,
+
+      fontSize: 12,
+
+      lineHeight: 18,
+
+      color:
+        "#778078",
+    },
+
+    statusRow: {
+      flexDirection:
+        "row",
+
+      justifyContent:
+        "space-between",
+
+      width:
+        "100%",
+
+      marginTop: 20,
+    },
+
+    statusItem: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+    },
+
+    statusPoint: {
+      width: 11,
+
+      height: 11,
+
+      borderRadius: 6,
+
+      marginRight: 6,
+    },
+
+    green: {
+      backgroundColor:
+        "#2E9D50",
+    },
+
+    yellow: {
+      backgroundColor:
+        "#E0A82E",
+    },
+
+    red: {
+      backgroundColor:
+        "#D63E3E",
+    },
+
+    statusLabel: {
+      fontSize: 13,
+
+      color:
+        "#526157",
+    },
+
+    heightRules: {
+      marginTop: 20,
+
+      fontSize: 12,
+
+      color:
+        "#778078",
+
+      textAlign:
+        "center",
+
+      lineHeight: 19,
+    },
+
+    analyzeButton: {
+      marginHorizontal: 20,
+
+      marginTop: 28,
+
+      backgroundColor:
+        "#21894A",
+
+      paddingVertical: 16,
+
+      borderRadius: 14,
+
+      alignItems:
+        "center",
+    },
+
+    analyzeButtonDisabled: {
+      backgroundColor:
+        "#A7B6AA",
+    },
+
+    analyzeButtonText: {
+      color:
+        "#FFFFFF",
+
+      fontSize: 17,
+
+      fontWeight:
+        "bold",
+    },
+
+    saveButton: {
+      marginHorizontal: 20,
+
+      marginTop: 28,
+
+      backgroundColor:
+        "#164B2A",
+
+      paddingVertical: 16,
+
+      borderRadius: 14,
+
+      alignItems:
+        "center",
+    },
+
+    saveButtonText: {
+      color:
+        "#FFFFFF",
+
+      fontSize: 17,
+
+      fontWeight:
+        "bold",
+    },
+
+    retryButton: {
+      marginHorizontal: 20,
+
+      marginTop: 20,
+
+      backgroundColor:
+        "#E5F2E9",
+
+      paddingVertical: 15,
+
+      borderRadius: 14,
+
+      alignItems:
+        "center",
+    },
+
+    retryButtonText: {
+      color:
+        "#21894A",
+
+      fontSize: 16,
+
+      fontWeight:
+        "bold",
+    },
+
+    helpText: {
+      marginHorizontal: 30,
+
+      marginTop: 12,
+
+      color:
+        "#778078",
+
+      fontSize: 12,
+
+      textAlign:
+        "center",
+    },
+
+    readyText: {
+      marginHorizontal: 30,
+
+      marginTop: 12,
+
+      color:
+        "#21894A",
+
+      fontSize: 12,
+
+      fontWeight:
+        "600",
+
+      textAlign:
+        "center",
+    },
+
+    resultLabel: {
+      fontSize: 13,
+
+      color:
+        "#6B756E",
+    },
+
+    resultBadge: {
+      marginTop: 12,
+
+      paddingHorizontal: 22,
+
+      paddingVertical: 10,
+
+      borderRadius: 24,
+    },
+
+    resultNormal: {
+      backgroundColor:
+        "#2E9D50",
+    },
+
+    resultAttention: {
+      backgroundColor:
+        "#E0A82E",
+    },
+
+    resultCritical: {
+      backgroundColor:
+        "#D63E3E",
+    },
+
+    resultInconclusive: {
+      backgroundColor:
+        "#7A817C",
+    },
+
+    resultBadgeText: {
+      color:
+        "#FFFFFF",
+
+      fontSize: 18,
+
+      fontWeight:
+        "bold",
+    },
+
+    resultConfidence: {
+      marginTop: 10,
+
+      color:
+        "#526157",
+
+      fontSize: 14,
+
+      fontWeight:
+        "600",
+    },
+
+    analyzingTitle: {
+      marginTop: 15,
+
+      fontSize: 18,
+
+      fontWeight:
+        "bold",
+
+      color:
+        "#1D2A21",
+    },
+
+    processingText: {
+      marginTop: 12,
+
+      fontSize: 12,
+
+      color:
+        "#778078",
+
+      textAlign:
+        "center",
+    },
+
+    aiDetails: {
+      width:
+        "100%",
+
+      marginTop: 24,
+
+      backgroundColor:
+        "#F4F7F4",
+
+      borderRadius: 12,
+
+      padding: 16,
+    },
+
+    aiDetailsTitle: {
+      fontSize: 14,
+
+      fontWeight:
+        "bold",
+
+      color:
+        "#1D2A21",
+
+      marginBottom: 10,
+    },
+
+    aiDetailRow: {
+      flexDirection:
+        "row",
+
+      justifyContent:
+        "space-between",
+
+      alignItems:
+        "center",
+
+      marginTop: 8,
+    },
+
+    aiDetailLabel: {
+      fontSize: 13,
+
+      color:
+        "#667168",
+    },
+
+    aiDetailValue: {
+      fontSize: 13,
+
+      fontWeight:
+        "bold",
+
+      color:
+        "#1D2A21",
+    },
+
+    probabilityBox: {
+      width:
+        "100%",
+
+      marginTop: 14,
+
+      borderWidth: 1,
+
+      borderColor:
+        "#E1E7E2",
+
+      borderRadius: 12,
+
+      padding: 16,
+    },
+
+    probabilityText: {
+      fontSize: 13,
+
+      color:
+        "#526157",
+
+      marginTop: 5,
+    },
+
+  });
+  
