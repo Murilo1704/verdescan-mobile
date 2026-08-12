@@ -12,9 +12,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+
+import { adicionarOcorrencia } from "../services/storage";
+import { Ocorrencia } from "../types/Ocorrencia";
 
 type Localizacao = {
   latitude: number;
@@ -22,12 +26,19 @@ type Localizacao = {
   precisao: number | null;
 };
 
+type ResultadoAnalise = {
+  classe: "NORMAL" | "ATENCAO" | "CRITICO";
+  confianca: number;
+};
+
 export default function AnaliseScreen() {
   const [fotoUri, setFotoUri] =
     useState<string | null>(null);
 
   const [origemFoto, setOrigemFoto] =
-    useState<"camera" | "galeria" | null>(null);
+    useState<"camera" | "galeria" | null>(
+      null
+    );
 
   const [localizacao, setLocalizacao] =
     useState<Localizacao | null>(null);
@@ -36,6 +47,24 @@ export default function AnaliseScreen() {
     buscandoLocalizacao,
     setBuscandoLocalizacao,
   ] = useState(false);
+
+  const [rodovia, setRodovia] =
+    useState("");
+
+  const [km, setKm] =
+    useState("");
+
+  const [resultado, setResultado] =
+    useState<ResultadoAnalise | null>(
+      null
+    );
+
+  const [salvando, setSalvando] =
+    useState(false);
+
+  // =========================================================
+  // CÂMERA
+  // =========================================================
 
   async function tirarFoto() {
     const permissao =
@@ -50,17 +79,28 @@ export default function AnaliseScreen() {
       return;
     }
 
-    const resultado =
+    const resultadoFoto =
       await ImagePicker.launchCameraAsync({
         allowsEditing: false,
         quality: 0.8,
       });
 
-    if (!resultado.canceled) {
-      setFotoUri(resultado.assets[0].uri);
+    if (!resultadoFoto.canceled) {
+      setFotoUri(
+        resultadoFoto.assets[0].uri
+      );
+
       setOrigemFoto("camera");
+
+      // Se trocar a foto, a análise anterior
+      // deixa de ser válida.
+      setResultado(null);
     }
   }
+
+  // =========================================================
+  // GALERIA
+  // =========================================================
 
   async function selecionarFoto() {
     const permissao =
@@ -75,18 +115,27 @@ export default function AnaliseScreen() {
       return;
     }
 
-    const resultado =
+    const resultadoFoto =
       await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ["images"],
         allowsEditing: true,
         quality: 0.8,
       });
 
-    if (!resultado.canceled) {
-      setFotoUri(resultado.assets[0].uri);
+    if (!resultadoFoto.canceled) {
+      setFotoUri(
+        resultadoFoto.assets[0].uri
+      );
+
       setOrigemFoto("galeria");
+
+      setResultado(null);
     }
   }
+
+  // =========================================================
+  // GPS
+  // =========================================================
 
   async function capturarLocalizacao() {
     try {
@@ -105,14 +154,22 @@ export default function AnaliseScreen() {
       }
 
       const posicao =
-        await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
+        await Location.getCurrentPositionAsync(
+          {
+            accuracy:
+              Location.Accuracy.High,
+          }
+        );
 
       setLocalizacao({
-        latitude: posicao.coords.latitude,
-        longitude: posicao.coords.longitude,
-        precisao: posicao.coords.accuracy,
+        latitude:
+          posicao.coords.latitude,
+
+        longitude:
+          posicao.coords.longitude,
+
+        precisao:
+          posicao.coords.accuracy,
       });
     } catch (erro) {
       console.error(erro);
@@ -122,34 +179,240 @@ export default function AnaliseScreen() {
         "Não foi possível obter sua localização."
       );
     } finally {
-      setBuscandoLocalizacao(false);
+      setBuscandoLocalizacao(
+        false
+      );
     }
   }
+
+  // =========================================================
+  // MENSAGENS
+  // =========================================================
 
   function mostrarMensagem(
     titulo: string,
     mensagem: string
   ) {
     if (Platform.OS === "web") {
-      alert(`${titulo}\n\n${mensagem}`);
+      alert(
+        `${titulo}\n\n${mensagem}`
+      );
+
       return;
     }
 
-    Alert.alert(titulo, mensagem);
+    Alert.alert(
+      titulo,
+      mensagem
+    );
   }
+
+  // =========================================================
+  // VALIDAR KM
+  // =========================================================
+
+  function obterKmNumerico() {
+    const kmNormalizado =
+      km.replace(",", ".");
+
+    const valor = Number(
+      kmNormalizado
+    );
+
+    if (
+      Number.isNaN(valor) ||
+      valor < 0
+    ) {
+      return null;
+    }
+
+    return valor;
+  }
+
+  // =========================================================
+  // ANALISAR
+  // =========================================================
+
+  async function analisarOcorrencia() {
+    if (!fotoUri) {
+      mostrarMensagem(
+        "Foto necessária",
+        "Registre uma foto da vegetação antes de continuar."
+      );
+
+      return;
+    }
+
+    if (!localizacao) {
+      mostrarMensagem(
+        "Localização necessária",
+        "Capture a localização antes de continuar."
+      );
+
+      return;
+    }
+
+    if (!rodovia.trim()) {
+      mostrarMensagem(
+        "Rodovia necessária",
+        "Informe a rodovia onde a análise está sendo realizada."
+      );
+
+      return;
+    }
+
+    const kmNumerico =
+      obterKmNumerico();
+
+    if (kmNumerico === null) {
+      mostrarMensagem(
+        "KM inválido",
+        "Informe um KM válido."
+      );
+
+      return;
+    }
+
+    /*
+      =======================================================
+      PRÓXIMO PASSO:
+      AQUI VAMOS ENVIAR fotoUri PARA A API DO VERDESCAN.
+
+      Exemplo futuro:
+
+      const resposta = await analisarImagemAPI(fotoUri);
+
+      setResultado({
+        classe: resposta.classe,
+        confianca: resposta.confianca,
+      });
+
+      =======================================================
+    */
+
+    mostrarMensagem(
+      "Dados preparados",
+      "Foto, GPS, rodovia e KM estão prontos. No próximo passo vamos conectar esta tela à API da inteligência artificial."
+    );
+  }
+
+  // =========================================================
+  // SALVAR OCORRÊNCIA
+  // =========================================================
+
+  async function salvarOcorrencia() {
+    if (
+      !resultado ||
+      !fotoUri ||
+      !localizacao
+    ) {
+      return;
+    }
+
+    const kmNumerico =
+      obterKmNumerico();
+
+    if (kmNumerico === null) {
+      return;
+    }
+
+    try {
+      setSalvando(true);
+
+      const novaOcorrencia: Ocorrencia =
+        {
+          id: `${Date.now()}`,
+
+          data:
+            new Date().toISOString(),
+
+          rodovia:
+            rodovia
+              .trim()
+              .toUpperCase(),
+
+          km: kmNumerico,
+
+          latitude:
+            localizacao.latitude,
+
+          longitude:
+            localizacao.longitude,
+
+          classe:
+            resultado.classe,
+
+          confianca:
+            resultado.confianca,
+
+          status: "PENDENTE",
+
+          imagem: fotoUri,
+        };
+
+      await adicionarOcorrencia(
+        novaOcorrencia
+      );
+
+      mostrarMensagem(
+        "Ocorrência salva",
+        "A análise foi registrada com sucesso."
+      );
+
+      router.replace(
+        "/prioridades"
+      );
+    } catch (erro) {
+      console.error(erro);
+
+      mostrarMensagem(
+        "Erro",
+        "Não foi possível salvar a ocorrência."
+      );
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  // =========================================================
+  // CONTROLE DO BOTÃO
+  // =========================================================
+
+  const kmValido =
+    obterKmNumerico() !== null;
 
   const podeAnalisar =
     fotoUri !== null &&
-    localizacao !== null;
+    localizacao !== null &&
+    rodovia.trim().length > 0 &&
+    km.trim().length > 0 &&
+    kmValido;
+
+  // =========================================================
+  // INTERFACE
+  // =========================================================
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <SafeAreaView
+      style={styles.container}
+    >
+      <ScrollView
+        contentContainerStyle={
+          styles.content
+        }
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* HEADER */}
+
         <View style={styles.header}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() =>
+              router.back()
+            }
           >
-            <Text style={styles.backButton}>
+            <Text
+              style={styles.backButton}
+            >
               ‹ Voltar
             </Text>
           </TouchableOpacity>
@@ -158,13 +421,22 @@ export default function AnaliseScreen() {
             Nova análise
           </Text>
 
-          <Text style={styles.subtitle}>
-            Registre uma nova ocorrência de vegetação
+          <Text
+            style={styles.subtitle}
+          >
+            Registre uma nova ocorrência
+            de vegetação
           </Text>
         </View>
 
+        {/* ===============================================
+            1. FOTO
+        =============================================== */}
+
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
+          <Text
+            style={styles.sectionTitle}
+          >
             1. Foto da vegetação
           </Text>
 
@@ -172,26 +444,49 @@ export default function AnaliseScreen() {
             {fotoUri ? (
               <>
                 <Image
-                  source={{ uri: fotoUri }}
-                  style={styles.previewImage}
+                  source={{
+                    uri: fotoUri,
+                  }}
+                  style={
+                    styles.previewImage
+                  }
                 />
 
-                <View style={styles.successRow}>
-                  <View style={styles.successPoint} />
+                <View
+                  style={
+                    styles.successRow
+                  }
+                >
+                  <View
+                    style={
+                      styles.successPoint
+                    }
+                  />
 
-                  <Text style={styles.successText}>
+                  <Text
+                    style={
+                      styles.successText
+                    }
+                  >
                     Foto registrada
                   </Text>
                 </View>
 
-                <Text style={styles.photoOrigin}>
-                  {origemFoto === "camera"
+                <Text
+                  style={
+                    styles.photoOrigin
+                  }
+                >
+                  {origemFoto ===
+                  "camera"
                     ? "Foto tirada pela câmera"
                     : "Imagem selecionada da galeria"}
                 </Text>
 
                 <TouchableOpacity
-                  style={styles.primaryPhotoButton}
+                  style={
+                    styles.primaryPhotoButton
+                  }
                   onPress={tirarFoto}
                 >
                   <Text
@@ -204,11 +499,17 @@ export default function AnaliseScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={selecionarFoto}
+                  style={
+                    styles.secondaryButton
+                  }
+                  onPress={
+                    selecionarFoto
+                  }
                 >
                   <Text
-                    style={styles.secondaryButtonText}
+                    style={
+                      styles.secondaryButtonText
+                    }
                   >
                     Escolher outra da galeria
                   </Text>
@@ -216,21 +517,35 @@ export default function AnaliseScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.icon}>
+                <Text
+                  style={styles.icon}
+                >
                   📷
                 </Text>
 
-                <Text style={styles.cardTitle}>
+                <Text
+                  style={
+                    styles.cardTitle
+                  }
+                >
                   Registre a vegetação
                 </Text>
 
-                <Text style={styles.cardText}>
-                  Tire uma foto no local ou escolha uma
-                  imagem existente para realizar a análise.
+                <Text
+                  style={
+                    styles.cardText
+                  }
+                >
+                  Tire uma foto no local
+                  ou escolha uma imagem
+                  existente para realizar
+                  a análise.
                 </Text>
 
                 <TouchableOpacity
-                  style={styles.primaryPhotoButton}
+                  style={
+                    styles.primaryPhotoButton
+                  }
                   onPress={tirarFoto}
                 >
                   <Text
@@ -243,11 +558,17 @@ export default function AnaliseScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={selecionarFoto}
+                  style={
+                    styles.secondaryButton
+                  }
+                  onPress={
+                    selecionarFoto
+                  }
                 >
                   <Text
-                    style={styles.secondaryButtonText}
+                    style={
+                      styles.secondaryButtonText
+                    }
                   >
                     Escolher da galeria
                   </Text>
@@ -257,34 +578,62 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
+        {/* ===============================================
+            2. LOCALIZAÇÃO
+        =============================================== */}
+
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            2. Localização
+          <Text
+            style={styles.sectionTitle}
+          >
+            2. Localização GPS
           </Text>
 
           <View style={styles.card}>
             {!localizacao ? (
               <>
-                <Text style={styles.icon}>
+                <Text
+                  style={styles.icon}
+                >
                   📍
                 </Text>
 
-                <Text style={styles.cardTitle}>
-                  Localização ainda não capturada
+                <Text
+                  style={
+                    styles.cardTitle
+                  }
+                >
+                  Localização ainda não
+                  capturada
                 </Text>
 
-                <Text style={styles.cardText}>
-                  O VerdeScan registrará latitude,
-                  longitude e precisão do GPS.
+                <Text
+                  style={
+                    styles.cardText
+                  }
+                >
+                  O VerdeScan registrará
+                  latitude, longitude e
+                  precisão do GPS.
                 </Text>
 
                 <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={capturarLocalizacao}
-                  disabled={buscandoLocalizacao}
+                  style={
+                    styles.secondaryButton
+                  }
+                  onPress={
+                    capturarLocalizacao
+                  }
+                  disabled={
+                    buscandoLocalizacao
+                  }
                 >
                   {buscandoLocalizacao ? (
-                    <View style={styles.loadingRow}>
+                    <View
+                      style={
+                        styles.loadingRow
+                      }
+                    >
                       <ActivityIndicator
                         size="small"
                         color="#21894A"
@@ -311,55 +660,106 @@ export default function AnaliseScreen() {
               </>
             ) : (
               <>
-                <View style={styles.successRow}>
-                  <View style={styles.successPoint} />
+                <View
+                  style={
+                    styles.successRow
+                  }
+                >
+                  <View
+                    style={
+                      styles.successPoint
+                    }
+                  />
 
-                  <Text style={styles.successText}>
+                  <Text
+                    style={
+                      styles.successText
+                    }
+                  >
                     Localização capturada
                   </Text>
                 </View>
 
-                <View style={styles.locationData}>
-                  <View style={styles.locationItem}>
+                <View
+                  style={
+                    styles.locationData
+                  }
+                >
+                  <View
+                    style={
+                      styles.locationItem
+                    }
+                  >
                     <Text
-                      style={styles.locationLabel}
+                      style={
+                        styles.locationLabel
+                      }
                     >
                       Latitude
                     </Text>
 
                     <Text
-                      style={styles.locationValue}
+                      style={
+                        styles.locationValue
+                      }
                     >
-                      {localizacao.latitude.toFixed(6)}
+                      {localizacao.latitude.toFixed(
+                        6
+                      )}
                     </Text>
                   </View>
 
                   <View
-                    style={styles.locationDivider}
+                    style={
+                      styles.locationDivider
+                    }
                   />
 
-                  <View style={styles.locationItem}>
+                  <View
+                    style={
+                      styles.locationItem
+                    }
+                  >
                     <Text
-                      style={styles.locationLabel}
+                      style={
+                        styles.locationLabel
+                      }
                     >
                       Longitude
                     </Text>
 
                     <Text
-                      style={styles.locationValue}
+                      style={
+                        styles.locationValue
+                      }
                     >
-                      {localizacao.longitude.toFixed(6)}
+                      {localizacao.longitude.toFixed(
+                        6
+                      )}
                     </Text>
                   </View>
                 </View>
 
-                <View style={styles.accuracyBox}>
-                  <Text style={styles.accuracyLabel}>
+                <View
+                  style={
+                    styles.accuracyBox
+                  }
+                >
+                  <Text
+                    style={
+                      styles.accuracyLabel
+                    }
+                  >
                     Precisão estimada
                   </Text>
 
-                  <Text style={styles.accuracyValue}>
-                    {localizacao.precisao !== null
+                  <Text
+                    style={
+                      styles.accuracyValue
+                    }
+                  >
+                    {localizacao.precisao !==
+                    null
                       ? `${Math.round(
                           localizacao.precisao
                         )} metros`
@@ -368,11 +768,17 @@ export default function AnaliseScreen() {
                 </View>
 
                 <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={capturarLocalizacao}
+                  style={
+                    styles.secondaryButton
+                  }
+                  onPress={
+                    capturarLocalizacao
+                  }
                 >
                   <Text
-                    style={styles.secondaryButtonText}
+                    style={
+                      styles.secondaryButtonText
+                    }
                   >
                     Atualizar localização
                   </Text>
@@ -382,98 +788,328 @@ export default function AnaliseScreen() {
           </View>
         </View>
 
+        {/* ===============================================
+            3. RODOVIA E KM
+        =============================================== */}
+
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            3. Classificação
+          <Text
+            style={styles.sectionTitle}
+          >
+            3. Trecho da rodovia
           </Text>
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>
-              Aguardando análise
+          <View
+            style={[
+              styles.card,
+              styles.formCard,
+            ]}
+          >
+            <Text
+              style={styles.inputLabel}
+            >
+              Rodovia
             </Text>
 
-            <Text style={styles.cardText}>
-              A inteligência artificial classificará
-              o trecho de acordo com a altura da
-              vegetação.
+            <TextInput
+              style={styles.input}
+              value={rodovia}
+              onChangeText={(texto) => {
+                setRodovia(texto);
+                setResultado(null);
+              }}
+              placeholder="Ex.: SP-330"
+              placeholderTextColor="#9AA39C"
+              autoCapitalize="characters"
+            />
+
+            <Text
+              style={[
+                styles.inputLabel,
+                styles.secondInputLabel,
+              ]}
+            >
+              KM
             </Text>
 
-            <View style={styles.statusRow}>
-              <View style={styles.statusItem}>
-                <View
-                  style={[
-                    styles.statusPoint,
-                    styles.green,
-                  ]}
-                />
+            <TextInput
+              style={styles.input}
+              value={km}
+              onChangeText={(texto) => {
+                setKm(texto);
+                setResultado(null);
+              }}
+              placeholder="Ex.: 105"
+              placeholderTextColor="#9AA39C"
+              keyboardType="decimal-pad"
+            />
 
-                <Text style={styles.statusLabel}>
-                  Normal
-                </Text>
-              </View>
-
-              <View style={styles.statusItem}>
-                <View
-                  style={[
-                    styles.statusPoint,
-                    styles.yellow,
-                  ]}
-                />
-
-                <Text style={styles.statusLabel}>
-                  Atenção
-                </Text>
-              </View>
-
-              <View style={styles.statusItem}>
-                <View
-                  style={[
-                    styles.statusPoint,
-                    styles.red,
-                  ]}
-                />
-
-                <Text style={styles.statusLabel}>
-                  Crítico
-                </Text>
-              </View>
-            </View>
+            <Text
+              style={styles.fieldHelp}
+            >
+              Essas informações serão
+              utilizadas no mapa, na lista
+              de prioridades e no arquivo
+              CSV.
+            </Text>
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.analyzeButton,
-            !podeAnalisar &&
-              styles.analyzeButtonDisabled,
-          ]}
-          disabled={!podeAnalisar}
-          onPress={() => {
-            console.log(
-              "Ocorrência pronta para classificação"
-            );
-          }}
-        >
-          <Text style={styles.analyzeButtonText}>
-            Analisar ocorrência
-          </Text>
-        </TouchableOpacity>
+        {/* ===============================================
+            4. CLASSIFICAÇÃO
+        =============================================== */}
 
-        {!podeAnalisar ? (
-          <Text style={styles.helpText}>
-            Registre uma foto e capture sua localização
-            para continuar.
+        <View style={styles.section}>
+          <Text
+            style={styles.sectionTitle}
+          >
+            4. Classificação
           </Text>
-        ) : (
-          <Text style={styles.readyText}>
-            Foto e localização registradas. A ocorrência
-            está pronta para análise.
-          </Text>
+
+          <View style={styles.card}>
+            {resultado ? (
+              <>
+                <Text
+                  style={
+                    styles.resultLabel
+                  }
+                >
+                  Resultado da análise
+                </Text>
+
+                <View
+                  style={[
+                    styles.resultBadge,
+
+                    resultado.classe ===
+                    "CRITICO"
+                      ? styles.resultCritical
+                      : resultado.classe ===
+                          "ATENCAO"
+                        ? styles.resultAttention
+                        : styles.resultNormal,
+                  ]}
+                >
+                  <Text
+                    style={
+                      styles.resultBadgeText
+                    }
+                  >
+                    {
+                      resultado.classe
+                    }
+                  </Text>
+                </View>
+
+                <Text
+                  style={
+                    styles.resultConfidence
+                  }
+                >
+                  Confiança:{" "}
+                  {(
+                    resultado.confianca *
+                    100
+                  ).toFixed(2)}
+                  %
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text
+                  style={
+                    styles.cardTitle
+                  }
+                >
+                  Aguardando análise
+                </Text>
+
+                <Text
+                  style={
+                    styles.cardText
+                  }
+                >
+                  A inteligência artificial
+                  classificará o trecho de
+                  acordo com a vegetação
+                  identificada na imagem.
+                </Text>
+
+                <View
+                  style={
+                    styles.statusRow
+                  }
+                >
+                  <View
+                    style={
+                      styles.statusItem
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.statusPoint,
+                        styles.green,
+                      ]}
+                    />
+
+                    <Text
+                      style={
+                        styles.statusLabel
+                      }
+                    >
+                      Normal
+                    </Text>
+                  </View>
+
+                  <View
+                    style={
+                      styles.statusItem
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.statusPoint,
+                        styles.yellow,
+                      ]}
+                    />
+
+                    <Text
+                      style={
+                        styles.statusLabel
+                      }
+                    >
+                      Atenção
+                    </Text>
+                  </View>
+
+                  <View
+                    style={
+                      styles.statusItem
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.statusPoint,
+                        styles.red,
+                      ]}
+                    />
+
+                    <Text
+                      style={
+                        styles.statusLabel
+                      }
+                    >
+                      Crítico
+                    </Text>
+                  </View>
+                </View>
+
+                <Text
+                  style={
+                    styles.heightRules
+                  }
+                >
+                  Normal: até 10 cm{"\n"}
+                  Atenção: acima de 10 até
+                  30 cm{"\n"}
+                  Crítico: acima de 30 cm
+                </Text>
+              </>
+            )}
+          </View>
+        </View>
+
+        {/* ===============================================
+            ANALISAR
+        =============================================== */}
+
+        {!resultado && (
+          <TouchableOpacity
+            style={[
+              styles.analyzeButton,
+
+              !podeAnalisar &&
+                styles.analyzeButtonDisabled,
+            ]}
+            disabled={
+              !podeAnalisar
+            }
+            onPress={
+              analisarOcorrencia
+            }
+          >
+            <Text
+              style={
+                styles.analyzeButtonText
+              }
+            >
+              Analisar ocorrência
+            </Text>
+          </TouchableOpacity>
         )}
+
+        {/* ===============================================
+            SALVAR
+        =============================================== */}
+
+        {resultado && (
+          <TouchableOpacity
+            style={
+              styles.saveButton
+            }
+            onPress={
+              salvarOcorrencia
+            }
+            disabled={salvando}
+          >
+            {salvando ? (
+              <ActivityIndicator
+                color="#FFFFFF"
+              />
+            ) : (
+              <Text
+                style={
+                  styles.saveButtonText
+                }
+              >
+                Salvar ocorrência
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {/* AJUDA */}
+
+        {!podeAnalisar &&
+          !resultado && (
+            <Text
+              style={styles.helpText}
+            >
+              Registre uma foto, capture
+              sua localização e informe a
+              rodovia e o KM para
+              continuar.
+            </Text>
+          )}
+
+        {podeAnalisar &&
+          !resultado && (
+            <Text
+              style={styles.readyText}
+            >
+              Todos os dados foram
+              preenchidos. A ocorrência
+              está pronta para análise.
+            </Text>
+          )}
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+// ===========================================================
+// ESTILOS
+// ===========================================================
 
 const styles = StyleSheet.create({
   container: {
@@ -482,7 +1118,7 @@ const styles = StyleSheet.create({
   },
 
   content: {
-    paddingBottom: 40,
+    paddingBottom: 50,
   },
 
   header: {
@@ -527,6 +1163,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     alignItems: "center",
+  },
+
+  formCard: {
+    alignItems: "stretch",
   },
 
   icon: {
@@ -667,6 +1307,36 @@ const styles = StyleSheet.create({
     color: "#1D2A21",
   },
 
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#1D2A21",
+    marginBottom: 7,
+  },
+
+  secondInputLabel: {
+    marginTop: 18,
+  },
+
+  input: {
+    width: "100%",
+    backgroundColor: "#F4F7F4",
+    borderWidth: 1,
+    borderColor: "#D8E0DA",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 16,
+    color: "#1D2A21",
+  },
+
+  fieldHelp: {
+    marginTop: 15,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#778078",
+  },
+
   statusRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -703,6 +1373,14 @@ const styles = StyleSheet.create({
     color: "#526157",
   },
 
+  heightRules: {
+    marginTop: 20,
+    fontSize: 12,
+    color: "#778078",
+    textAlign: "center",
+    lineHeight: 19,
+  },
+
   analyzeButton: {
     marginHorizontal: 20,
     marginTop: 28,
@@ -717,6 +1395,21 @@ const styles = StyleSheet.create({
   },
 
   analyzeButtonText: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "bold",
+  },
+
+  saveButton: {
+    marginHorizontal: 20,
+    marginTop: 28,
+    backgroundColor: "#164B2A",
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+  },
+
+  saveButtonText: {
     color: "#FFFFFF",
     fontSize: 17,
     fontWeight: "bold",
@@ -738,5 +1431,40 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
-});
 
+  resultLabel: {
+    fontSize: 13,
+    color: "#6B756E",
+  },
+
+  resultBadge: {
+    marginTop: 12,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 24,
+  },
+
+  resultNormal: {
+    backgroundColor: "#2E9D50",
+  },
+
+  resultAttention: {
+    backgroundColor: "#E0A82E",
+  },
+
+  resultCritical: {
+    backgroundColor: "#D63E3E",
+  },
+
+  resultBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+
+  resultConfidence: {
+    marginTop: 10,
+    color: "#526157",
+    fontSize: 14,
+  },
+});
