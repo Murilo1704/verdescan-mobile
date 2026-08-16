@@ -1,6 +1,8 @@
 import { router } from "expo-router";
+
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
+
 import { useState } from "react";
 
 import {
@@ -17,20 +19,27 @@ import {
   View,
 } from "react-native";
 
-import { adicionarOcorrencia } from "../services/storage";
-import { Ocorrencia } from "../types/Ocorrencia";
+import {
+  adicionarOcorrencia,
+} from "../services/storage";
+
+import {
+  Ocorrencia,
+} from "../types/Ocorrencia";
 
 
 // ============================================================
-// CONFIGURAÇÃO DA API
+// API
 // ============================================================
 
-// IP atual do notebook que está rodando a API.
-// Se o IPv4 do notebook mudar no futuro,
-// basta alterar somente esta linha.
+const API_BASE_URL =
+  "http://10.0.0.30:8000";
 
-const API_URL =
-  "http://10.0.0.30:8000/analisar";
+const API_ANALISE_URL =
+  `${API_BASE_URL}/analisar`;
+
+const API_LOCALIZACAO_URL =
+  `${API_BASE_URL}/localizar-trecho`;
 
 
 // ============================================================
@@ -42,6 +51,20 @@ type Localizacao = {
   longitude: number;
   precisao: number | null;
 };
+
+
+type OrigemFoto =
+  | "camera"
+  | "galeria"
+  | null;
+
+
+type OrigemLocalizacao =
+  | "FOTO"
+  | "GPS_ATUAL"
+  | "MANUAL"
+  | "RODOVIA_KM"
+  | null;
 
 
 type ClasseAnalise =
@@ -101,203 +124,646 @@ type RespostaAPI = {
 };
 
 
+type RespostaLocalizacao = {
+  status: string;
+
+  rodovia: string;
+
+  km: number;
+
+  latitude: number;
+
+  longitude: number;
+
+  origem: string;
+
+  aproximada: boolean;
+
+  qualidade:
+    | "REFERENCIA"
+    | "BOA"
+    | "MEDIA"
+    | "BAIXA"
+    | string;
+
+  km_referencia_anterior: number;
+
+  km_referencia_posterior: number;
+};
+
+
+// ============================================================
+// EXIF - FUNÇÕES AUXILIARES
+// ============================================================
+
+function normalizarNomeChave(
+  chave: string
+) {
+  return chave
+    .replace(
+      /[^a-zA-Z0-9]/g,
+      ""
+    )
+    .toUpperCase();
+}
+
+
+function obterValorExif(
+  exif:
+    Record<string, any> |
+    null |
+    undefined,
+
+  nomes: string[]
+) {
+  if (!exif) {
+    return undefined;
+  }
+
+
+  const nomesNormalizados =
+    nomes.map(
+      normalizarNomeChave
+    );
+
+
+  for (
+    const [chave, valor]
+    of Object.entries(exif)
+  ) {
+    const chaveNormalizada =
+      normalizarNomeChave(
+        chave
+      );
+
+
+    if (
+      nomesNormalizados.includes(
+        chaveNormalizada
+      )
+    ) {
+      return valor;
+    }
+  }
+
+
+  return undefined;
+}
+
+
+// ============================================================
+// CONVERTER VALORES EXIF
+// ============================================================
+
+function converterRacional(
+  valor: any
+): number | null {
+
+  if (
+    typeof valor ===
+      "number" &&
+    Number.isFinite(
+      valor
+    )
+  ) {
+    return valor;
+  }
+
+
+  if (
+    typeof valor ===
+    "string"
+  ) {
+    const texto =
+      valor.trim();
+
+
+    if (!texto) {
+      return null;
+    }
+
+
+    if (
+      texto.includes("/")
+    ) {
+      const partes =
+        texto.split("/");
+
+
+      if (
+        partes.length === 2
+      ) {
+        const numerador =
+          Number(
+            partes[0]
+          );
+
+        const denominador =
+          Number(
+            partes[1]
+          );
+
+
+        if (
+          Number.isFinite(
+            numerador
+          ) &&
+          Number.isFinite(
+            denominador
+          ) &&
+          denominador !== 0
+        ) {
+          return (
+            numerador /
+            denominador
+          );
+        }
+      }
+    }
+
+
+    const numero =
+      Number(
+        texto.replace(
+          ",",
+          "."
+        )
+      );
+
+
+    if (
+      Number.isFinite(
+        numero
+      )
+    ) {
+      return numero;
+    }
+  }
+
+
+  if (
+    valor &&
+    typeof valor ===
+      "object"
+  ) {
+    const numerador =
+      Number(
+        valor.numerator ??
+        valor.numerador
+      );
+
+    const denominador =
+      Number(
+        valor.denominator ??
+        valor.denominador
+      );
+
+
+    if (
+      Number.isFinite(
+        numerador
+      ) &&
+      Number.isFinite(
+        denominador
+      ) &&
+      denominador !== 0
+    ) {
+      return (
+        numerador /
+        denominador
+      );
+    }
+  }
+
+
+  return null;
+}
+
+
+// ============================================================
+// CONVERTER COORDENADA EXIF
+// ============================================================
+
+function converterCoordenadaExif(
+  valor: any
+): number | null {
+
+  if (
+    typeof valor ===
+      "number" &&
+    Number.isFinite(
+      valor
+    )
+  ) {
+    return valor;
+  }
+
+
+  if (
+    Array.isArray(
+      valor
+    )
+  ) {
+
+    if (
+      valor.length >= 3
+    ) {
+      const graus =
+        converterRacional(
+          valor[0]
+        );
+
+      const minutos =
+        converterRacional(
+          valor[1]
+        );
+
+      const segundos =
+        converterRacional(
+          valor[2]
+        );
+
+
+      if (
+        graus !== null &&
+        minutos !== null &&
+        segundos !== null
+      ) {
+        return (
+          Math.abs(
+            graus
+          ) +
+          minutos / 60 +
+          segundos / 3600
+        );
+      }
+    }
+
+
+    if (
+      valor.length === 1
+    ) {
+      return converterRacional(
+        valor[0]
+      );
+    }
+  }
+
+
+  if (
+    typeof valor ===
+    "string"
+  ) {
+    const texto =
+      valor.trim();
+
+
+    if (!texto) {
+      return null;
+    }
+
+
+    if (
+      /^-?\d+([.,]\d+)?$/.test(
+        texto
+      )
+    ) {
+      const numero =
+        Number(
+          texto.replace(
+            ",",
+            "."
+          )
+        );
+
+
+      return Number.isFinite(
+        numero
+      )
+        ? numero
+        : null;
+    }
+
+
+    const partes =
+      texto
+        .replace(
+          /[°'"]/g,
+          " "
+        )
+        .split(
+          /[\s,]+/
+        )
+        .filter(
+          Boolean
+        );
+
+
+    if (
+      partes.length >= 3
+    ) {
+      const graus =
+        converterRacional(
+          partes[0]
+        );
+
+      const minutos =
+        converterRacional(
+          partes[1]
+        );
+
+      const segundos =
+        converterRacional(
+          partes[2]
+        );
+
+
+      if (
+        graus !== null &&
+        minutos !== null &&
+        segundos !== null
+      ) {
+        return (
+          Math.abs(
+            graus
+          ) +
+          minutos / 60 +
+          segundos / 3600
+        );
+      }
+    }
+  }
+
+
+  return null;
+}
+
+
+// ============================================================
+// EXTRAIR GPS DA FOTO
+// ============================================================
+
+function extrairLocalizacaoExif(
+  exif:
+    Record<string, any> |
+    null |
+    undefined
+): Localizacao | null {
+
+  if (!exif) {
+    return null;
+  }
+
+
+  const valorLatitude =
+    obterValorExif(
+      exif,
+      [
+        "latitude",
+        "gpslatitude",
+      ]
+    );
+
+
+  const valorLongitude =
+    obterValorExif(
+      exif,
+      [
+        "longitude",
+        "gpslongitude",
+      ]
+    );
+
+
+  let latitude =
+    converterCoordenadaExif(
+      valorLatitude
+    );
+
+  let longitude =
+    converterCoordenadaExif(
+      valorLongitude
+    );
+
+
+  if (
+    latitude === null ||
+    longitude === null
+  ) {
+    return null;
+  }
+
+
+  const latitudeRef =
+    String(
+      obterValorExif(
+        exif,
+        [
+          "gpslatituderef",
+          "latituderef",
+        ]
+      ) ??
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+
+  const longitudeRef =
+    String(
+      obterValorExif(
+        exif,
+        [
+          "gpslongituderef",
+          "longituderef",
+        ]
+      ) ??
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+
+  if (
+    latitudeRef === "S"
+  ) {
+    latitude =
+      -Math.abs(
+        latitude
+      );
+  }
+
+
+  if (
+    latitudeRef === "N"
+  ) {
+    latitude =
+      Math.abs(
+        latitude
+      );
+  }
+
+
+  if (
+    longitudeRef === "W"
+  ) {
+    longitude =
+      -Math.abs(
+        longitude
+      );
+  }
+
+
+  if (
+    longitudeRef === "E"
+  ) {
+    longitude =
+      Math.abs(
+        longitude
+      );
+  }
+
+
+  if (
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+
+  return {
+    latitude,
+    longitude,
+    precisao:
+      null,
+  };
+}
+
+
 // ============================================================
 // TELA
 // ============================================================
 
 export default function AnaliseScreen() {
-  const [fotoUri, setFotoUri] =
-    useState<string | null>(null);
-
-  const [origemFoto, setOrigemFoto] =
-    useState<
-      "camera" | "galeria" | null
-    >(null);
-
-  const [localizacao, setLocalizacao] =
-    useState<Localizacao | null>(null);
 
   const [
-    buscandoLocalizacao,
-    setBuscandoLocalizacao,
-  ] = useState(false);
+    fotoUri,
+    setFotoUri,
+  ] =
+    useState<string | null>(
+      null
+    );
 
-  const [rodovia, setRodovia] =
+
+  const [
+    origemFoto,
+    setOrigemFoto,
+  ] =
+    useState<OrigemFoto>(
+      null
+    );
+
+
+  const [
+    localizacao,
+    setLocalizacao,
+  ] =
+    useState<Localizacao | null>(
+      null
+    );
+
+
+  const [
+    origemLocalizacao,
+    setOrigemLocalizacao,
+  ] =
+    useState<OrigemLocalizacao>(
+      null
+    );
+
+
+  const [
+    qualidadeLocalizacao,
+    setQualidadeLocalizacao,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+
+  const [
+    rodovia,
+    setRodovia,
+  ] =
     useState("");
 
-  const [km, setKm] =
+
+  const [
+    km,
+    setKm,
+  ] =
     useState("");
 
-  const [resultado, setResultado] =
+
+  const [
+    latitudeManual,
+    setLatitudeManual,
+  ] =
+    useState("");
+
+
+  const [
+    longitudeManual,
+    setLongitudeManual,
+  ] =
+    useState("");
+
+
+  const [
+    resultado,
+    setResultado,
+  ] =
     useState<ResultadoAnalise | null>(
       null
     );
 
-  const [analisando, setAnalisando] =
+
+  const [
+    analisando,
+    setAnalisando,
+  ] =
     useState(false);
 
-  const [salvando, setSalvando] =
+
+  const [
+    salvando,
+    setSalvando,
+  ] =
     useState(false);
 
 
-  // =========================================================
-  // CÂMERA
-  // =========================================================
-
-  async function tirarFoto() {
-    const permissao =
-      await ImagePicker
-        .requestCameraPermissionsAsync();
-
-    if (!permissao.granted) {
-      mostrarMensagem(
-        "Permissão necessária",
-        "O VerdeScan precisa acessar a câmera para registrar a vegetação."
-      );
-
-      return;
-    }
-
-    const resultadoFoto =
-      await ImagePicker
-        .launchCameraAsync({
-          allowsEditing: false,
-          quality: 0.8,
-        });
-
-    if (!resultadoFoto.canceled) {
-      setFotoUri(
-        resultadoFoto.assets[0].uri
-      );
-
-      setOrigemFoto(
-        "camera"
-      );
-
-      setResultado(
-        null
-      );
-    }
-  }
+  const [
+    buscandoLocalizacao,
+    setBuscandoLocalizacao,
+  ] =
+    useState(false);
 
 
-  // =========================================================
-  // GALERIA
-  // =========================================================
-
-  async function selecionarFoto() {
-    const permissao =
-      await ImagePicker
-        .requestMediaLibraryPermissionsAsync();
-
-    if (!permissao.granted) {
-      mostrarMensagem(
-        "Permissão necessária",
-        "O VerdeScan precisa acessar suas fotos."
-      );
-
-      return;
-    }
-
-    const resultadoFoto =
-      await ImagePicker
-        .launchImageLibraryAsync({
-          mediaTypes: ["images"],
-          allowsEditing: true,
-          quality: 0.8,
-        });
-
-    if (!resultadoFoto.canceled) {
-      setFotoUri(
-        resultadoFoto.assets[0].uri
-      );
-
-      setOrigemFoto(
-        "galeria"
-      );
-
-      setResultado(
-        null
-      );
-    }
-  }
-
-
-  // =========================================================
-  // GPS
-  // =========================================================
-
-  async function capturarLocalizacao() {
-    try {
-      setBuscandoLocalizacao(
-        true
-      );
-
-      const { status } =
-        await Location
-          .requestForegroundPermissionsAsync();
-
-      if (
-        status !== "granted"
-      ) {
-        mostrarMensagem(
-          "Permissão necessária",
-          "O VerdeScan precisa da localização para registrar onde a análise foi realizada."
-        );
-
-        return;
-      }
-
-      const posicao =
-        await Location
-          .getCurrentPositionAsync({
-            accuracy:
-              Location.Accuracy.High,
-          });
-
-      setLocalizacao({
-        latitude:
-          posicao.coords.latitude,
-
-        longitude:
-          posicao.coords.longitude,
-
-        precisao:
-          posicao.coords.accuracy,
-      });
-
-      setResultado(
-        null
-      );
-
-    } catch (erro) {
-      console.error(
-        erro
-      );
-
-      mostrarMensagem(
-        "Erro de localização",
-        "Não foi possível obter sua localização."
-      );
-
-    } finally {
-      setBuscandoLocalizacao(
-        false
-      );
-    }
-  }
-
-
-  // =========================================================
-  // MENSAGENS
-  // =========================================================
+// ============================================================
+// MENSAGEM
+// ============================================================
 
   function mostrarMensagem(
     titulo: string,
     mensagem: string
   ) {
+
     if (
-      Platform.OS === "web"
+      Platform.OS ===
+      "web"
     ) {
       alert(
         `${titulo}\n\n${mensagem}`
@@ -306,6 +772,7 @@ export default function AnaliseScreen() {
       return;
     }
 
+
     Alert.alert(
       titulo,
       mensagem
@@ -313,42 +780,696 @@ export default function AnaliseScreen() {
   }
 
 
-  // =========================================================
-  // VALIDAR KM
-  // =========================================================
+// ============================================================
+// LIMPAR RESULTADO
+// ============================================================
+
+  function limparResultado() {
+    setResultado(
+      null
+    );
+  }
+
+
+// ============================================================
+// LIMPAR LOCALIZAÇÃO CALCULADA
+// ============================================================
+
+  function limparLocalizacaoCalculada() {
+
+    if (
+      origemLocalizacao ===
+      "RODOVIA_KM" ||
+      origemLocalizacao ===
+      "MANUAL"
+    ) {
+      setLocalizacao(
+        null
+      );
+
+      setOrigemLocalizacao(
+        null
+      );
+
+      setQualidadeLocalizacao(
+        null
+      );
+    }
+  }
+
+
+// ============================================================
+// CÂMERA
+// ============================================================
+
+  async function tirarFoto() {
+
+    const permissao =
+      await ImagePicker
+        .requestCameraPermissionsAsync();
+
+
+    if (
+      !permissao.granted
+    ) {
+      mostrarMensagem(
+        "Permissão necessária",
+        "O VerdeScan precisa acessar a câmera."
+      );
+
+      return;
+    }
+
+
+    const resultadoFoto =
+      await ImagePicker
+        .launchCameraAsync({
+          allowsEditing:
+            false,
+
+          quality:
+            0.8,
+
+          exif:
+            true,
+        });
+
+
+    if (
+      resultadoFoto.canceled
+    ) {
+      return;
+    }
+
+
+    const asset =
+      resultadoFoto.assets[0];
+
+
+    setFotoUri(
+      asset.uri
+    );
+
+    setOrigemFoto(
+      "camera"
+    );
+
+    setResultado(
+      null
+    );
+
+    setLocalizacao(
+      null
+    );
+
+    setOrigemLocalizacao(
+      null
+    );
+
+    setQualidadeLocalizacao(
+      null
+    );
+
+
+    // --------------------------------------------------------
+    // TENTA GPS ATUAL
+    // --------------------------------------------------------
+
+    try {
+
+      setBuscandoLocalizacao(
+        true
+      );
+
+
+      const {
+        status,
+      } =
+        await Location
+          .requestForegroundPermissionsAsync();
+
+
+      if (
+        status !==
+        "granted"
+      ) {
+        return;
+      }
+
+
+      const posicao =
+        await Location
+          .getCurrentPositionAsync({
+            accuracy:
+              Location
+                .Accuracy
+                .High,
+          });
+
+
+      setLocalizacao({
+        latitude:
+          posicao.coords
+            .latitude,
+
+        longitude:
+          posicao.coords
+            .longitude,
+
+        precisao:
+          posicao.coords
+            .accuracy,
+      });
+
+
+      setOrigemLocalizacao(
+        "GPS_ATUAL"
+      );
+
+
+      setQualidadeLocalizacao(
+        "GPS"
+      );
+
+
+    } catch (
+      erro
+    ) {
+      console.log(
+        "GPS atual indisponível:",
+        erro
+      );
+
+    } finally {
+
+      setBuscandoLocalizacao(
+        false
+      );
+    }
+  }
+
+
+// ============================================================
+// GALERIA
+// ============================================================
+
+  async function selecionarFoto() {
+
+    const permissao =
+      await ImagePicker
+        .requestMediaLibraryPermissionsAsync();
+
+
+    if (
+      !permissao.granted
+    ) {
+      mostrarMensagem(
+        "Permissão necessária",
+        "O VerdeScan precisa acessar suas fotos."
+      );
+
+      return;
+    }
+
+
+    const resultadoFoto =
+      await ImagePicker
+        .launchImageLibraryAsync({
+          mediaTypes: [
+            "images",
+          ],
+
+          allowsEditing:
+            false,
+
+          quality:
+            0.8,
+
+          exif:
+            true,
+        });
+
+
+    if (
+      resultadoFoto.canceled
+    ) {
+      return;
+    }
+
+
+    const asset =
+      resultadoFoto.assets[0];
+
+
+    setFotoUri(
+      asset.uri
+    );
+
+
+    setOrigemFoto(
+      "galeria"
+    );
+
+
+    setResultado(
+      null
+    );
+
+
+    setLocalizacao(
+      null
+    );
+
+
+    setOrigemLocalizacao(
+      null
+    );
+
+
+    setQualidadeLocalizacao(
+      null
+    );
+
+
+    console.log(
+      "EXIF DA FOTO:",
+      asset.exif
+    );
+
+
+    const gpsFoto =
+      extrairLocalizacaoExif(
+        asset.exif as
+          Record<string, any> |
+          null |
+          undefined
+      );
+
+
+    if (
+      gpsFoto
+    ) {
+
+      setLocalizacao(
+        gpsFoto
+      );
+
+
+      setOrigemLocalizacao(
+        "FOTO"
+      );
+
+
+      setQualidadeLocalizacao(
+        "GPS DA FOTO"
+      );
+
+
+      mostrarMensagem(
+        "Localização encontrada",
+        "O VerdeScan encontrou as coordenadas salvas na própria foto."
+      );
+
+
+      return;
+    }
+
+
+    mostrarMensagem(
+      "Foto sem GPS",
+      "Nenhum problema. Informe a rodovia e o KM. O VerdeScan estimará automaticamente onde fica o ponto. Latitude e longitude também podem ser informadas opcionalmente."
+    );
+  }
+
+
+// ============================================================
+// KM
+// ============================================================
 
   function obterKmNumerico() {
-    const kmNormalizado =
-      km.replace(
-        ",",
-        "."
-      );
 
     const valor =
       Number(
-        kmNormalizado
+        km
+          .trim()
+          .replace(
+            ",",
+            "."
+          )
       );
 
+
     if (
-      Number.isNaN(valor) ||
+      !Number.isFinite(
+        valor
+      ) ||
       valor < 0
     ) {
       return null;
     }
 
+
     return valor;
   }
 
 
-  // =========================================================
-  // DESCOBRIR TIPO DA IMAGEM
-  // =========================================================
+// ============================================================
+// COORDENADAS MANUAIS
+// ============================================================
+
+  function obterLocalizacaoManual():
+    Localizacao |
+    null {
+
+    const latTexto =
+      latitudeManual.trim();
+
+    const lngTexto =
+      longitudeManual.trim();
+
+
+    // Nenhum dos dois preenchidos
+
+    if (
+      !latTexto &&
+      !lngTexto
+    ) {
+      return null;
+    }
+
+
+    // Apenas um preenchido
+
+    if (
+      !latTexto ||
+      !lngTexto
+    ) {
+      throw new Error(
+        "Para usar coordenadas manuais, informe latitude e longitude."
+      );
+    }
+
+
+    const latitude =
+      Number(
+        latTexto.replace(
+          ",",
+          "."
+        )
+      );
+
+
+    const longitude =
+      Number(
+        lngTexto.replace(
+          ",",
+          "."
+        )
+      );
+
+
+    if (
+      !Number.isFinite(
+        latitude
+      ) ||
+      latitude < -90 ||
+      latitude > 90
+    ) {
+      throw new Error(
+        "Latitude inválida."
+      );
+    }
+
+
+    if (
+      !Number.isFinite(
+        longitude
+      ) ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      throw new Error(
+        "Longitude inválida."
+      );
+    }
+
+
+    return {
+      latitude,
+      longitude,
+      precisao:
+        null,
+    };
+  }
+
+
+// ============================================================
+// LOCALIZAR POR RODOVIA + KM
+// ============================================================
+
+  async function localizarPorRodoviaKm(
+    rodoviaInformada: string,
+    kmInformado: number
+  ):
+    Promise<{
+      localizacao: Localizacao;
+      qualidade: string;
+    }> {
+
+    const resposta =
+      await fetch(
+        API_LOCALIZACAO_URL,
+        {
+          method:
+            "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            Accept:
+              "application/json",
+          },
+
+          body:
+            JSON.stringify({
+              rodovia:
+                rodoviaInformada
+                  .trim()
+                  .toUpperCase(),
+
+              km:
+                kmInformado,
+            }),
+        }
+      );
+
+
+    if (
+      !resposta.ok
+    ) {
+
+      let mensagem =
+        "Não foi possível localizar o trecho.";
+
+
+      try {
+
+        const erro =
+          await resposta.json();
+
+
+        mensagem =
+          erro.detail ??
+          mensagem;
+
+
+      } catch {
+        // mantém mensagem padrão
+      }
+
+
+      throw new Error(
+        mensagem
+      );
+    }
+
+
+    const dados:
+      RespostaLocalizacao =
+      await resposta.json();
+
+
+    return {
+
+      localizacao: {
+        latitude:
+          dados.latitude,
+
+        longitude:
+          dados.longitude,
+
+        precisao:
+          null,
+      },
+
+      qualidade:
+        dados.aproximada
+          ? dados.qualidade
+          : "REFERÊNCIA EXATA",
+
+    };
+  }
+
+
+// ============================================================
+// RESOLVER LOCALIZAÇÃO
+// ============================================================
+
+  async function resolverLocalizacao():
+    Promise<Localizacao> {
+
+    // --------------------------------------------------------
+    // 1. GPS DA FOTO
+    // --------------------------------------------------------
+
+    if (
+      origemLocalizacao ===
+        "FOTO" &&
+      localizacao
+    ) {
+      return localizacao;
+    }
+
+
+    // --------------------------------------------------------
+    // 2. GPS ATUAL DA CÂMERA
+    // --------------------------------------------------------
+
+    if (
+      origemLocalizacao ===
+        "GPS_ATUAL" &&
+      localizacao
+    ) {
+      return localizacao;
+    }
+
+
+    // --------------------------------------------------------
+    // 3. LATITUDE / LONGITUDE OPCIONAIS
+    // --------------------------------------------------------
+
+    const manual =
+      obterLocalizacaoManual();
+
+
+    if (
+      manual
+    ) {
+
+      setLocalizacao(
+        manual
+      );
+
+
+      setOrigemLocalizacao(
+        "MANUAL"
+      );
+
+
+      setQualidadeLocalizacao(
+        "COORDENADAS INFORMADAS"
+      );
+
+
+      return manual;
+    }
+
+
+    // --------------------------------------------------------
+    // 4. RODOVIA + KM
+    // --------------------------------------------------------
+
+    const kmNumerico =
+      obterKmNumerico();
+
+
+    if (
+      !rodovia.trim()
+    ) {
+      throw new Error(
+        "Informe a rodovia."
+      );
+    }
+
+
+    if (
+      kmNumerico ===
+      null
+    ) {
+      throw new Error(
+        "Informe um KM válido."
+      );
+    }
+
+
+    setBuscandoLocalizacao(
+      true
+    );
+
+
+    try {
+
+      const resultadoLocalizacao =
+        await localizarPorRodoviaKm(
+          rodovia,
+          kmNumerico
+        );
+
+
+      setLocalizacao(
+        resultadoLocalizacao
+          .localizacao
+      );
+
+
+      setOrigemLocalizacao(
+        "RODOVIA_KM"
+      );
+
+
+      setQualidadeLocalizacao(
+        resultadoLocalizacao
+          .qualidade
+      );
+
+
+      return (
+        resultadoLocalizacao
+          .localizacao
+      );
+
+
+    } finally {
+
+      setBuscandoLocalizacao(
+        false
+      );
+    }
+  }
+
+
+// ============================================================
+// MIME
+// ============================================================
 
   function obterMimeType(
     uri: string
   ) {
+
     const endereco =
       uri.toLowerCase();
+
 
     if (
       endereco.includes(
@@ -358,6 +1479,7 @@ export default function AnaliseScreen() {
       return "image/png";
     }
 
+
     if (
       endereco.includes(
         ".webp"
@@ -366,24 +1488,40 @@ export default function AnaliseScreen() {
       return "image/webp";
     }
 
+
+    if (
+      endereco.includes(
+        ".heic"
+      ) ||
+      endereco.includes(
+        ".heif"
+      )
+    ) {
+      return "image/heic";
+    }
+
+
     return "image/jpeg";
   }
 
 
-  // =========================================================
-  // CRIAR NOME DO ARQUIVO
-  // =========================================================
+// ============================================================
+// NOME ARQUIVO
+// ============================================================
 
   function obterNomeArquivo(
     uri: string
   ) {
+
     const partes =
       uri.split("/");
+
 
     const ultimo =
       partes[
         partes.length - 1
       ];
+
 
     if (
       ultimo &&
@@ -392,24 +1530,30 @@ export default function AnaliseScreen() {
       return ultimo;
     }
 
-    return `verdescan_${Date.now()}.jpg`;
+
+    return (
+      `verdescan_${Date.now()}.jpg`
+    );
   }
 
 
-  // =========================================================
-  // ENVIAR FOTO PARA API
-  // =========================================================
+// ============================================================
+// ENVIAR CNN
+// ============================================================
 
   async function enviarFotoParaAPI(
     uri: string
   ): Promise<RespostaAPI> {
+
     const formData =
       new FormData();
+
 
     const nomeArquivo =
       obterNomeArquivo(
         uri
       );
+
 
     const mimeType =
       obterMimeType(
@@ -417,21 +1561,21 @@ export default function AnaliseScreen() {
       );
 
 
-    // -------------------------------------------------------
-    // WEB
-    // -------------------------------------------------------
-
     if (
-      Platform.OS === "web"
+      Platform.OS ===
+      "web"
     ) {
+
       const respostaArquivo =
         await fetch(
           uri
         );
 
+
       const blob =
         await respostaArquivo
           .blob();
+
 
       formData.append(
         "imagem",
@@ -439,18 +1583,17 @@ export default function AnaliseScreen() {
         nomeArquivo
       );
 
-    } else {
 
-      // -----------------------------------------------------
-      // IPHONE / ANDROID
-      // -----------------------------------------------------
+    } else {
 
       formData.append(
         "imagem",
         {
           uri,
+
           name:
             nomeArquivo,
+
           type:
             mimeType,
         } as any
@@ -458,29 +1601,28 @@ export default function AnaliseScreen() {
     }
 
 
-    // Timeout de 2 minutos.
-    // Como os modelos estão rodando
-    // pela CPU do notebook,
-    // a primeira análise pode demorar.
-
     const controller =
       new AbortController();
+
 
     const timeout =
       setTimeout(
         () => {
           controller.abort();
         },
+
         120000
       );
 
 
     try {
+
       const resposta =
         await fetch(
-          API_URL,
+          API_ANALISE_URL,
           {
-            method: "POST",
+            method:
+              "POST",
 
             body:
               formData,
@@ -499,12 +1641,16 @@ export default function AnaliseScreen() {
       if (
         !resposta.ok
       ) {
+
         let detalhe =
           "Erro desconhecido";
 
+
         try {
+
           const erroJson =
             await resposta.json();
+
 
           detalhe =
             erroJson.detail ??
@@ -512,10 +1658,13 @@ export default function AnaliseScreen() {
               erroJson
             );
 
+
         } catch {
+
           detalhe =
             await resposta.text();
         }
+
 
         throw new Error(
           `API ${resposta.status}: ${detalhe}`
@@ -523,12 +1672,13 @@ export default function AnaliseScreen() {
       }
 
 
-      const dados =
-        await resposta.json();
+      return (
+        await resposta.json()
+      );
 
-      return dados;
 
     } finally {
+
       clearTimeout(
         timeout
       );
@@ -536,25 +1686,19 @@ export default function AnaliseScreen() {
   }
 
 
-  // =========================================================
-  // ANALISAR OCORRÊNCIA
-  // =========================================================
+// ============================================================
+// ANALISAR
+// ============================================================
 
   async function analisarOcorrencia() {
-    if (!fotoUri) {
+
+    if (
+      !fotoUri
+    ) {
+
       mostrarMensagem(
         "Foto necessária",
-        "Registre uma foto da vegetação antes de continuar."
-      );
-
-      return;
-    }
-
-
-    if (!localizacao) {
-      mostrarMensagem(
-        "Localização necessária",
-        "Capture a localização antes de continuar."
+        "Selecione ou tire uma foto."
       );
 
       return;
@@ -564,9 +1708,10 @@ export default function AnaliseScreen() {
     if (
       !rodovia.trim()
     ) {
+
       mostrarMensagem(
         "Rodovia necessária",
-        "Informe a rodovia onde a análise está sendo realizada."
+        "Informe a rodovia."
       );
 
       return;
@@ -576,9 +1721,12 @@ export default function AnaliseScreen() {
     const kmNumerico =
       obterKmNumerico();
 
+
     if (
-      kmNumerico === null
+      kmNumerico ===
+      null
     ) {
+
       mostrarMensagem(
         "KM inválido",
         "Informe um KM válido."
@@ -589,9 +1737,11 @@ export default function AnaliseScreen() {
 
 
     try {
+
       setAnalisando(
         true
       );
+
 
       setResultado(
         null
@@ -599,7 +1749,14 @@ export default function AnaliseScreen() {
 
 
       // =====================================================
-      // CHAMADA REAL DA API
+      // PRIMEIRO RESOLVE A LOCALIZAÇÃO
+      // =====================================================
+
+      await resolverLocalizacao();
+
+
+      // =====================================================
+      // DEPOIS EXECUTA A CNN
       // =====================================================
 
       const resposta =
@@ -609,14 +1766,10 @@ export default function AnaliseScreen() {
 
 
       console.log(
-        "Resposta VerdeScan API:",
+        "Resposta VerdeScan:",
         resposta
       );
 
-
-      // =====================================================
-      // CASO INCONCLUSIVO
-      // =====================================================
 
       if (
         resposta.status ===
@@ -624,7 +1777,9 @@ export default function AnaliseScreen() {
         resposta.classe ===
           "INCONCLUSIVO"
       ) {
+
         setResultado({
+
           classe:
             "INCONCLUSIVO",
 
@@ -664,16 +1819,13 @@ export default function AnaliseScreen() {
 
         mostrarMensagem(
           "Análise inconclusiva",
-          "A inteligência artificial não encontrou vegetação suficiente para realizar uma classificação confiável. Tente tirar outra foto mais próxima da vegetação."
+          "A IA não encontrou vegetação suficiente para classificar o trecho."
         );
+
 
         return;
       }
 
-
-      // =====================================================
-      // VALIDAR CLASSE
-      // =====================================================
 
       if (
         resposta.classe !==
@@ -683,17 +1835,15 @@ export default function AnaliseScreen() {
         resposta.classe !==
           "CRITICO"
       ) {
+
         throw new Error(
           "A API retornou uma classe inválida."
         );
       }
 
 
-      // =====================================================
-      // SALVAR RESULTADO NA TELA
-      // =====================================================
-
       setResultado({
+
         classe:
           resposta.classe,
 
@@ -736,7 +1886,10 @@ export default function AnaliseScreen() {
       });
 
 
-    } catch (erro: any) {
+    } catch (
+      erro: any
+    ) {
+
       console.error(
         "Erro na análise:",
         erro
@@ -744,29 +1897,28 @@ export default function AnaliseScreen() {
 
 
       let mensagem =
-        "Não foi possível analisar a imagem.";
+        erro?.message ??
+        "Não foi possível realizar a análise.";
+
 
       if (
         erro?.name ===
         "AbortError"
       ) {
-        mensagem =
-          "A análise demorou mais que o esperado. Verifique se a API está rodando no notebook e tente novamente.";
 
-      } else if (
-        erro?.message
-      ) {
         mensagem =
-          erro.message;
+          "A análise demorou demais. Verifique se a API está ligada.";
       }
 
 
       mostrarMensagem(
-        "Erro na análise",
+        "Erro",
         mensagem
       );
 
+
     } finally {
+
       setAnalisando(
         false
       );
@@ -774,27 +1926,23 @@ export default function AnaliseScreen() {
   }
 
 
-  // =========================================================
-  // SALVAR OCORRÊNCIA
-  // =========================================================
+// ============================================================
+// SALVAR
+// ============================================================
 
   async function salvarOcorrencia() {
+
     if (
       !resultado ||
+      resultado.classe ===
+        "INCONCLUSIVO" ||
       !fotoUri ||
       !localizacao
     ) {
-      return;
-    }
 
-
-    if (
-      resultado.classe ===
-      "INCONCLUSIVO"
-    ) {
       mostrarMensagem(
-        "Análise inconclusiva",
-        "Uma análise inconclusiva não pode ser salva como ocorrência."
+        "Dados incompletos",
+        "Não foi possível salvar a ocorrência."
       );
 
       return;
@@ -804,21 +1952,25 @@ export default function AnaliseScreen() {
     const kmNumerico =
       obterKmNumerico();
 
+
     if (
-      kmNumerico === null
+      kmNumerico ===
+      null
     ) {
       return;
     }
 
 
     try {
+
       setSalvando(
         true
       );
 
 
-      const novaOcorrencia: Ocorrencia =
-        {
+      const novaOcorrencia:
+        Ocorrencia = {
+
           id:
             `${Date.now()}`,
 
@@ -865,25 +2017,38 @@ export default function AnaliseScreen() {
 
       mostrarMensagem(
         "Ocorrência salva",
-        "A análise foi registrada com sucesso."
+        "A ocorrência foi adicionada ao mapa do VerdeScan."
       );
 
+
+      // =====================================================
+      // VOLTA PARA HOME
+      // O useFocusEffect RECARRREGA O MAPA
+      // =====================================================
 
       router.replace(
-        "/prioridades"
+        "/"
       );
 
-    } catch (erro) {
+
+    } catch (
+      erro: any
+    ) {
+
       console.error(
         erro
       );
 
+
       mostrarMensagem(
         "Erro",
-        "Não foi possível salvar a ocorrência."
+        erro?.message ??
+        "Não foi possível salvar."
       );
 
+
     } finally {
+
       setSalvando(
         false
       );
@@ -891,9 +2056,9 @@ export default function AnaliseScreen() {
   }
 
 
-  // =========================================================
-  // CONTROLE DOS BOTÕES
-  // =========================================================
+// ============================================================
+// CONTROLES
+// ============================================================
 
   const kmValido =
     obterKmNumerico() !==
@@ -901,56 +2066,102 @@ export default function AnaliseScreen() {
 
 
   const podeAnalisar =
-    fotoUri !== null &&
-    localizacao !== null &&
+    fotoUri !==
+      null &&
+
     rodovia
       .trim()
-      .length > 0 &&
+      .length >
+      0 &&
+
     km
       .trim()
-      .length > 0 &&
+      .length >
+      0 &&
+
     kmValido &&
+
     !analisando;
 
 
-  const resultadoValido =
-    resultado !== null &&
-    resultado.classe !==
-      "INCONCLUSIVO";
+// ============================================================
+// TEXTO ORIGEM LOCALIZAÇÃO
+// ============================================================
+
+  function textoOrigemLocalizacao() {
+
+    if (
+      origemLocalizacao ===
+      "FOTO"
+    ) {
+      return "GPS da própria foto";
+    }
 
 
-  // =========================================================
-  // INTERFACE
-  // =========================================================
+    if (
+      origemLocalizacao ===
+      "GPS_ATUAL"
+    ) {
+      return "GPS atual do aparelho";
+    }
+
+
+    if (
+      origemLocalizacao ===
+      "MANUAL"
+    ) {
+      return "Coordenadas informadas pelo operador";
+    }
+
+
+    if (
+      origemLocalizacao ===
+      "RODOVIA_KM"
+    ) {
+      return "Estimativa baseada na rodovia e no KM";
+    }
+
+
+    return "Será definida antes da análise";
+  }
+
+
+// ============================================================
+// INTERFACE
+// ============================================================
 
   return (
+
     <SafeAreaView
       style={
         styles.container
       }
     >
+
       <ScrollView
         contentContainerStyle={
           styles.content
         }
+
         keyboardShouldPersistTaps=
           "handled"
       >
 
-        {/* ==================================================
-            HEADER
-        ================================================== */}
+
+        {/* HEADER */}
 
         <View
           style={
             styles.header
           }
         >
+
           <TouchableOpacity
             onPress={() =>
               router.back()
             }
           >
+
             <Text
               style={
                 styles.backButton
@@ -958,6 +2169,7 @@ export default function AnaliseScreen() {
             >
               ‹ Voltar
             </Text>
+
           </TouchableOpacity>
 
 
@@ -975,9 +2187,9 @@ export default function AnaliseScreen() {
               styles.subtitle
             }
           >
-            Registre uma nova
-            ocorrência de vegetação
+            Registre uma nova ocorrência de vegetação
           </Text>
+
         </View>
 
 
@@ -990,6 +2202,7 @@ export default function AnaliseScreen() {
             styles.section
           }
         >
+
           <Text
             style={
               styles.sectionTitle
@@ -1004,70 +2217,61 @@ export default function AnaliseScreen() {
               styles.card
             }
           >
+
             {fotoUri ? (
               <>
+
                 <Image
                   source={{
                     uri:
                       fotoUri,
                   }}
+
                   style={
                     styles.previewImage
                   }
                 />
 
 
-                <View
+                <Text
                   style={
-                    styles.successRow
+                    styles.successText
                   }
                 >
-                  <View
-                    style={
-                      styles.successPoint
-                    }
-                  />
-
-                  <Text
-                    style={
-                      styles.successText
-                    }
-                  >
-                    Foto registrada
-                  </Text>
-                </View>
+                  ✓ Foto registrada
+                </Text>
 
 
                 <Text
                   style={
-                    styles.photoOrigin
+                    styles.smallText
                   }
                 >
                   {origemFoto ===
                   "camera"
-                    ? "Foto tirada pela câmera"
+                    ? "Foto tirada agora"
                     : "Imagem selecionada da galeria"}
                 </Text>
 
 
                 <TouchableOpacity
                   style={
-                    styles.primaryPhotoButton
+                    styles.primaryButton
                   }
+
                   onPress={
                     tirarFoto
                   }
-                  disabled={
-                    analisando
-                  }
                 >
+
                   <Text
                     style={
-                      styles.primaryPhotoButtonText
+                      styles.primaryButtonText
                     }
                   >
                     Tirar nova foto
                   </Text>
+
                 </TouchableOpacity>
 
 
@@ -1075,26 +2279,27 @@ export default function AnaliseScreen() {
                   style={
                     styles.secondaryButton
                   }
+
                   onPress={
                     selecionarFoto
                   }
-                  disabled={
-                    analisando
-                  }
                 >
+
                   <Text
                     style={
                       styles.secondaryButtonText
                     }
                   >
-                    Escolher outra da
-                    galeria
+                    Escolher outra da galeria
                   </Text>
+
                 </TouchableOpacity>
+
               </>
 
             ) : (
               <>
+
                 <Text
                   style={
                     styles.icon
@@ -1118,28 +2323,28 @@ export default function AnaliseScreen() {
                     styles.cardText
                   }
                 >
-                  Tire uma foto no local
-                  ou escolha uma imagem
-                  existente para realizar
-                  a análise.
+                  Tire uma foto ou selecione uma imagem existente.
                 </Text>
 
 
                 <TouchableOpacity
                   style={
-                    styles.primaryPhotoButton
+                    styles.primaryButton
                   }
+
                   onPress={
                     tirarFoto
                   }
                 >
+
                   <Text
                     style={
-                      styles.primaryPhotoButtonText
+                      styles.primaryButtonText
                     }
                   >
                     Tirar foto agora
                   </Text>
+
                 </TouchableOpacity>
 
 
@@ -1147,10 +2352,12 @@ export default function AnaliseScreen() {
                   style={
                     styles.secondaryButton
                   }
+
                   onPress={
                     selecionarFoto
                   }
                 >
+
                   <Text
                     style={
                       styles.secondaryButtonText
@@ -1158,15 +2365,19 @@ export default function AnaliseScreen() {
                   >
                     Escolher da galeria
                   </Text>
+
                 </TouchableOpacity>
+
               </>
             )}
+
           </View>
+
         </View>
 
 
         {/* ==================================================
-            2. LOCALIZAÇÃO
+            2. TRECHO
         ================================================== */}
 
         <View
@@ -1174,249 +2385,13 @@ export default function AnaliseScreen() {
             styles.section
           }
         >
+
           <Text
             style={
               styles.sectionTitle
             }
           >
-            2. Localização GPS
-          </Text>
-
-
-          <View
-            style={
-              styles.card
-            }
-          >
-            {!localizacao ? (
-              <>
-                <Text
-                  style={
-                    styles.icon
-                  }
-                >
-                  📍
-                </Text>
-
-
-                <Text
-                  style={
-                    styles.cardTitle
-                  }
-                >
-                  Localização ainda não
-                  capturada
-                </Text>
-
-
-                <Text
-                  style={
-                    styles.cardText
-                  }
-                >
-                  O VerdeScan registrará
-                  latitude, longitude e
-                  precisão do GPS.
-                </Text>
-
-
-                <TouchableOpacity
-                  style={
-                    styles.secondaryButton
-                  }
-                  onPress={
-                    capturarLocalizacao
-                  }
-                  disabled={
-                    buscandoLocalizacao
-                  }
-                >
-                  {buscandoLocalizacao ? (
-                    <View
-                      style={
-                        styles.loadingRow
-                      }
-                    >
-                      <ActivityIndicator
-                        size="small"
-                        color="#21894A"
-                      />
-
-                      <Text
-                        style={
-                          styles.secondaryButtonText
-                        }
-                      >
-                        Obtendo localização...
-                      </Text>
-                    </View>
-
-                  ) : (
-                    <Text
-                      style={
-                        styles.secondaryButtonText
-                      }
-                    >
-                      Capturar localização
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </>
-
-            ) : (
-              <>
-                <View
-                  style={
-                    styles.successRow
-                  }
-                >
-                  <View
-                    style={
-                      styles.successPoint
-                    }
-                  />
-
-                  <Text
-                    style={
-                      styles.successText
-                    }
-                  >
-                    Localização capturada
-                  </Text>
-                </View>
-
-
-                <View
-                  style={
-                    styles.locationData
-                  }
-                >
-                  <View
-                    style={
-                      styles.locationItem
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.locationLabel
-                      }
-                    >
-                      Latitude
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.locationValue
-                      }
-                    >
-                      {localizacao.latitude.toFixed(
-                        6
-                      )}
-                    </Text>
-                  </View>
-
-
-                  <View
-                    style={
-                      styles.locationDivider
-                    }
-                  />
-
-
-                  <View
-                    style={
-                      styles.locationItem
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.locationLabel
-                      }
-                    >
-                      Longitude
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.locationValue
-                      }
-                    >
-                      {localizacao.longitude.toFixed(
-                        6
-                      )}
-                    </Text>
-                  </View>
-                </View>
-
-
-                <View
-                  style={
-                    styles.accuracyBox
-                  }
-                >
-                  <Text
-                    style={
-                      styles.accuracyLabel
-                    }
-                  >
-                    Precisão estimada
-                  </Text>
-
-                  <Text
-                    style={
-                      styles.accuracyValue
-                    }
-                  >
-                    {localizacao.precisao !==
-                    null
-                      ? `${Math.round(
-                          localizacao.precisao
-                        )} metros`
-                      : "Não disponível"}
-                  </Text>
-                </View>
-
-
-                <TouchableOpacity
-                  style={
-                    styles.secondaryButton
-                  }
-                  onPress={
-                    capturarLocalizacao
-                  }
-                  disabled={
-                    analisando
-                  }
-                >
-                  <Text
-                    style={
-                      styles.secondaryButtonText
-                    }
-                  >
-                    Atualizar localização
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-
-
-        {/* ==================================================
-            3. RODOVIA E KM
-        ================================================== */}
-
-        <View
-          style={
-            styles.section
-          }
-        >
-          <Text
-            style={
-              styles.sectionTitle
-            }
-          >
-            3. Trecho da rodovia
+            2. Trecho da rodovia
           </Text>
 
 
@@ -1426,12 +2401,13 @@ export default function AnaliseScreen() {
               styles.formCard,
             ]}
           >
+
             <Text
               style={
                 styles.inputLabel
               }
             >
-              Rodovia
+              Rodovia *
             </Text>
 
 
@@ -1439,29 +2415,32 @@ export default function AnaliseScreen() {
               style={
                 styles.input
               }
+
               value={
                 rodovia
               }
+
               onChangeText={(
                 texto
               ) => {
+
                 setRodovia(
                   texto
                 );
 
-                setResultado(
-                  null
-                );
+                limparResultado();
+
+                limparLocalizacaoCalculada();
               }}
+
               placeholder=
                 "Ex.: SP-330"
+
               placeholderTextColor=
                 "#9AA39C"
+
               autoCapitalize=
                 "characters"
-              editable={
-                !analisando
-              }
             />
 
 
@@ -1471,7 +2450,7 @@ export default function AnaliseScreen() {
                 styles.secondInputLabel,
               ]}
             >
-              KM
+              KM *
             </Text>
 
 
@@ -1479,43 +2458,294 @@ export default function AnaliseScreen() {
               style={
                 styles.input
               }
+
               value={
                 km
               }
+
               onChangeText={(
                 texto
               ) => {
+
                 setKm(
                   texto
                 );
 
-                setResultado(
-                  null
-                );
+                limparResultado();
+
+                limparLocalizacaoCalculada();
               }}
+
               placeholder=
-                "Ex.: 105"
+                "Ex.: 100"
+
               placeholderTextColor=
                 "#9AA39C"
+
               keyboardType=
                 "decimal-pad"
-              editable={
-                !analisando
-              }
             />
 
+          </View>
 
-            <Text
+        </View>
+
+
+        {/* ==================================================
+            3. LOCALIZAÇÃO
+        ================================================== */}
+
+        <View
+          style={
+            styles.section
+          }
+        >
+
+          <Text
+            style={
+              styles.sectionTitle
+            }
+          >
+            3. Localização
+          </Text>
+
+
+          <View
+            style={[
+              styles.card,
+              styles.formCard,
+            ]}
+          >
+
+            <View
               style={
-                styles.fieldHelp
+                styles.locationStatus
               }
             >
-              Essas informações serão
-              utilizadas no mapa, na lista
-              de prioridades e no arquivo
-              CSV.
-            </Text>
+
+              <Text
+                style={
+                  styles.locationStatusTitle
+                }
+              >
+                📍 {
+                  localizacao
+                    ? "Localização definida"
+                    : "Localização será identificada automaticamente"
+                }
+              </Text>
+
+
+              <Text
+                style={
+                  styles.locationStatusText
+                }
+              >
+                {
+                  textoOrigemLocalizacao()
+                }
+              </Text>
+
+
+              {qualidadeLocalizacao && (
+                <Text
+                  style={
+                    styles.qualityText
+                  }
+                >
+                  Qualidade: {
+                    qualidadeLocalizacao
+                  }
+                </Text>
+              )}
+
+            </View>
+
+
+            {localizacao && (
+
+              <View
+                style={
+                  styles.coordinatesBox
+                }
+              >
+
+                <Text
+                  style={
+                    styles.coordinateText
+                  }
+                >
+                  Latitude: {
+                    localizacao
+                      .latitude
+                      .toFixed(
+                        6
+                      )
+                  }
+                </Text>
+
+
+                <Text
+                  style={
+                    styles.coordinateText
+                  }
+                >
+                  Longitude: {
+                    localizacao
+                      .longitude
+                      .toFixed(
+                        6
+                      )
+                  }
+                </Text>
+
+              </View>
+
+            )}
+
+
+            <View
+              style={
+                styles.optionalBox
+              }
+            >
+
+              <Text
+                style={
+                  styles.optionalTitle
+                }
+              >
+                Coordenadas exatas (opcional)
+              </Text>
+
+
+              <Text
+                style={
+                  styles.optionalHelp
+                }
+              >
+                Se você souber a latitude e longitude exatas,
+                pode informá-las para melhorar a precisão.
+                Caso contrário, deixe os campos vazios e o
+                VerdeScan usará a rodovia e o KM.
+              </Text>
+
+
+              <Text
+                style={
+                  styles.inputLabel
+                }
+              >
+                Latitude
+              </Text>
+
+
+              <TextInput
+                style={
+                  styles.input
+                }
+
+                value={
+                  latitudeManual
+                }
+
+                onChangeText={(
+                  texto
+                ) => {
+
+                  setLatitudeManual(
+                    texto
+                  );
+
+                  limparResultado();
+
+                  limparLocalizacaoCalculada();
+                }}
+
+                placeholder=
+                  "-22.8866235"
+
+                placeholderTextColor=
+                  "#9AA39C"
+
+                keyboardType=
+                  "numbers-and-punctuation"
+              />
+
+
+              <Text
+                style={[
+                  styles.inputLabel,
+                  styles.secondInputLabel,
+                ]}
+              >
+                Longitude
+              </Text>
+
+
+              <TextInput
+                style={
+                  styles.input
+                }
+
+                value={
+                  longitudeManual
+                }
+
+                onChangeText={(
+                  texto
+                ) => {
+
+                  setLongitudeManual(
+                    texto
+                  );
+
+                  limparResultado();
+
+                  limparLocalizacaoCalculada();
+                }}
+
+                placeholder=
+                  "-47.1231735"
+
+                placeholderTextColor=
+                  "#9AA39C"
+
+                keyboardType=
+                  "numbers-and-punctuation"
+              />
+
+            </View>
+
+
+            {buscandoLocalizacao && (
+
+              <View
+                style={
+                  styles.loadingLocation
+                }
+              >
+
+                <ActivityIndicator
+                  size="small"
+                  color="#21894A"
+                />
+
+
+                <Text
+                  style={
+                    styles.loadingLocationText
+                  }
+                >
+                  Localizando trecho...
+                </Text>
+
+              </View>
+
+            )}
+
           </View>
+
         </View>
 
 
@@ -1528,6 +2758,7 @@ export default function AnaliseScreen() {
             styles.section
           }
         >
+
           <Text
             style={
               styles.sectionTitle
@@ -1543,55 +2774,34 @@ export default function AnaliseScreen() {
             }
           >
 
-            {/* CARREGANDO */}
-
             {analisando ? (
               <>
+
                 <ActivityIndicator
                   size="large"
                   color="#21894A"
                 />
 
+
                 <Text
                   style={
-                    styles.analyzingTitle
+                    styles.cardTitle
                   }
                 >
                   Analisando imagem...
                 </Text>
 
-                <Text
-                  style={
-                    styles.cardText
-                  }
-                >
-                  A imagem está sendo
-                  processada pelos modelos
-                  de segmentação e
-                  classificação.
-                </Text>
-
-                <Text
-                  style={
-                    styles.processingText
-                  }
-                >
-                  Isso pode levar alguns
-                  segundos.
-                </Text>
               </>
 
             ) : resultado ? (
               <>
-
-                {/* RESULTADO */}
 
                 <Text
                   style={
                     styles.resultLabel
                   }
                 >
-                  Resultado da análise
+                  Resultado
                 </Text>
 
 
@@ -1611,19 +2821,23 @@ export default function AnaliseScreen() {
                           : styles.resultInconclusive,
                   ]}
                 >
+
                   <Text
                     style={
                       styles.resultBadgeText
                     }
                   >
-                    {resultado.classe ===
-                    "ATENCAO"
-                      ? "ATENÇÃO"
-                      : resultado.classe ===
-                        "CRITICO"
+                    {
+                      resultado.classe ===
+                      "CRITICO"
                         ? "CRÍTICO"
-                        : resultado.classe}
+                        : resultado.classe ===
+                          "ATENCAO"
+                          ? "ATENÇÃO"
+                          : resultado.classe
+                    }
                   </Text>
+
                 </View>
 
 
@@ -1631,212 +2845,90 @@ export default function AnaliseScreen() {
                   "INCONCLUSIVO" && (
                   <Text
                     style={
-                      styles.resultConfidence
+                      styles.confidence
                     }
                   >
-                    Confiança:{" "}
-                    {(
-                      resultado.confianca *
-                      100
-                    ).toFixed(
-                      2
-                    )}
-                    %
+                    Confiança: {
+                      (
+                        resultado
+                          .confianca *
+                        100
+                      ).toFixed(
+                        2
+                      )
+                    }%
                   </Text>
                 )}
 
-
-                {/* DADOS SEGMENTAÇÃO */}
 
                 <View
                   style={
-                    styles.aiDetails
+                    styles.aiBox
                   }
                 >
+
                   <Text
                     style={
-                      styles.aiDetailsTitle
+                      styles.aiText
                     }
                   >
-                    Detalhes da análise
+                    Vegetação detectada: {
+                      resultado
+                        .vegetacaoTotal
+                        .toFixed(
+                          2
+                        )
+                    }%
                   </Text>
 
 
-                  <View
+                  <Text
                     style={
-                      styles.aiDetailRow
+                      styles.aiText
                     }
                   >
-                    <Text
-                      style={
-                        styles.aiDetailLabel
-                      }
-                    >
-                      Vegetação detectada
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.aiDetailValue
-                      }
-                    >
-                      {resultado.vegetacaoTotal.toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-                  </View>
+                    Vegetação baixa: {
+                      resultado
+                        .vegetacaoBaixa
+                        .toFixed(
+                          2
+                        )
+                    }%
+                  </Text>
 
 
-                  <View
+                  <Text
                     style={
-                      styles.aiDetailRow
+                      styles.aiText
                     }
                   >
-                    <Text
-                      style={
-                        styles.aiDetailLabel
-                      }
-                    >
-                      Vegetação baixa
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.aiDetailValue
-                      }
-                    >
-                      {resultado.vegetacaoBaixa.toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-                  </View>
+                    Vegetação alta: {
+                      resultado
+                        .vegetacaoAlta
+                        .toFixed(
+                          2
+                        )
+                    }%
+                  </Text>
 
 
-                  <View
+                  <Text
                     style={
-                      styles.aiDetailRow
+                      styles.aiText
                     }
                   >
-                    <Text
-                      style={
-                        styles.aiDetailLabel
-                      }
-                    >
-                      Vegetação alta
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.aiDetailValue
-                      }
-                    >
-                      {resultado.vegetacaoAlta.toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-                  </View>
-
-
-                  <View
-                    style={
-                      styles.aiDetailRow
+                    Regiões analisadas: {
+                      resultado
+                        .patchesAnalisados
                     }
-                  >
-                    <Text
-                      style={
-                        styles.aiDetailLabel
-                      }
-                    >
-                      Regiões analisadas
-                    </Text>
+                  </Text>
 
-                    <Text
-                      style={
-                        styles.aiDetailValue
-                      }
-                    >
-                      {resultado.patchesAnalisados}
-                    </Text>
-                  </View>
                 </View>
-
-
-                {/* PROBABILIDADES */}
-
-                {resultado.classe !==
-                  "INCONCLUSIVO" && (
-                  <View
-                    style={
-                      styles.probabilityBox
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.aiDetailsTitle
-                      }
-                    >
-                      Probabilidades
-                    </Text>
-
-
-                    <Text
-                      style={
-                        styles.probabilityText
-                      }
-                    >
-                      Normal:{" "}
-                      {(
-                        resultado.probabilidadeNormal *
-                        100
-                      ).toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-
-
-                    <Text
-                      style={
-                        styles.probabilityText
-                      }
-                    >
-                      Atenção:{" "}
-                      {(
-                        resultado.probabilidadeAtencao *
-                        100
-                      ).toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-
-
-                    <Text
-                      style={
-                        styles.probabilityText
-                      }
-                    >
-                      Crítico:{" "}
-                      {(
-                        resultado.probabilidadeCritico *
-                        100
-                      ).toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-                  </View>
-                )}
 
               </>
 
             ) : (
               <>
-
-                {/* AGUARDANDO */}
 
                 <Text
                   style={
@@ -1852,141 +2944,58 @@ export default function AnaliseScreen() {
                     styles.cardText
                   }
                 >
-                  A inteligência artificial
-                  classificará o trecho de
-                  acordo com a vegetação
-                  identificada na imagem.
+                  A IA classificará a vegetação como Normal,
+                  Atenção ou Crítico.
                 </Text>
-
-
-                <View
-                  style={
-                    styles.statusRow
-                  }
-                >
-                  <View
-                    style={
-                      styles.statusItem
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.statusPoint,
-                        styles.green,
-                      ]}
-                    />
-
-                    <Text
-                      style={
-                        styles.statusLabel
-                      }
-                    >
-                      Normal
-                    </Text>
-                  </View>
-
-
-                  <View
-                    style={
-                      styles.statusItem
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.statusPoint,
-                        styles.yellow,
-                      ]}
-                    />
-
-                    <Text
-                      style={
-                        styles.statusLabel
-                      }
-                    >
-                      Atenção
-                    </Text>
-                  </View>
-
-
-                  <View
-                    style={
-                      styles.statusItem
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.statusPoint,
-                        styles.red,
-                      ]}
-                    />
-
-                    <Text
-                      style={
-                        styles.statusLabel
-                      }
-                    >
-                      Crítico
-                    </Text>
-                  </View>
-                </View>
 
 
                 <Text
                   style={
-                    styles.heightRules
+                    styles.rules
                   }
                 >
                   Normal: até 10 cm{"\n"}
-                  Atenção: acima de 10 até
-                  30 cm{"\n"}
+                  Atenção: 10 a 30 cm{"\n"}
                   Crítico: acima de 30 cm
                 </Text>
+
               </>
             )}
+
           </View>
+
         </View>
 
 
-        {/* ==================================================
-            BOTÃO ANALISAR
-        ================================================== */}
+        {/* ANALISAR */}
 
         {!resultado && (
+
           <TouchableOpacity
             style={[
               styles.analyzeButton,
 
               !podeAnalisar &&
-              styles.analyzeButtonDisabled,
+                styles.disabledButton,
             ]}
+
             disabled={
               !podeAnalisar
             }
+
             onPress={
               analisarOcorrencia
             }
           >
 
             {analisando ? (
-              <View
-                style={
-                  styles.loadingRow
-                }
-              >
-                <ActivityIndicator
-                  color="#FFFFFF"
-                />
 
-                <Text
-                  style={
-                    styles.analyzeButtonText
-                  }
-                >
-                  Analisando...
-                </Text>
-              </View>
+              <ActivityIndicator
+                color="#FFFFFF"
+              />
 
             ) : (
+
               <Text
                 style={
                   styles.analyzeButtonText
@@ -1994,34 +3003,42 @@ export default function AnaliseScreen() {
               >
                 Analisar ocorrência
               </Text>
+
             )}
 
           </TouchableOpacity>
+
         )}
 
 
-        {/* ==================================================
-            SALVAR
-        ================================================== */}
+        {/* SALVAR */}
 
-        {resultadoValido && (
+        {resultado &&
+          resultado.classe !==
+            "INCONCLUSIVO" && (
+
           <TouchableOpacity
             style={
               styles.saveButton
             }
-            onPress={
-              salvarOcorrencia
-            }
+
             disabled={
               salvando
             }
+
+            onPress={
+              salvarOcorrencia
+            }
           >
+
             {salvando ? (
+
               <ActivityIndicator
                 color="#FFFFFF"
               />
 
             ) : (
+
               <Text
                 style={
                   styles.saveButtonText
@@ -2029,73 +3046,45 @@ export default function AnaliseScreen() {
               >
                 Salvar ocorrência
               </Text>
+
             )}
+
           </TouchableOpacity>
+
         )}
 
 
-        {/* ==================================================
-            REFAZER INCONCLUSIVO
-        ================================================== */}
+        {/* REFAZER */}
 
         {resultado?.classe ===
           "INCONCLUSIVO" && (
+
           <TouchableOpacity
             style={
-              styles.retryButton
+              styles.secondaryBottomButton
             }
-            onPress={() => {
+
+            onPress={() =>
               setResultado(
                 null
-              );
-            }}
+              )
+            }
           >
+
             <Text
               style={
-                styles.retryButtonText
+                styles.secondaryBottomButtonText
               }
             >
               Tentar outra análise
             </Text>
+
           </TouchableOpacity>
+
         )}
 
-
-        {/* ==================================================
-            AJUDA
-        ================================================== */}
-
-        {!podeAnalisar &&
-          !resultado &&
-          !analisando && (
-            <Text
-              style={
-                styles.helpText
-              }
-            >
-              Registre uma foto, capture
-              sua localização e informe a
-              rodovia e o KM para
-              continuar.
-            </Text>
-          )}
-
-
-        {podeAnalisar &&
-          !resultado &&
-          !analisando && (
-            <Text
-              style={
-                styles.readyText
-              }
-            >
-              Todos os dados foram
-              preenchidos. A ocorrência
-              está pronta para análise.
-            </Text>
-          )}
-
       </ScrollView>
+
     </SafeAreaView>
   );
 }
@@ -2110,61 +3099,81 @@ const styles =
 
     container: {
       flex: 1,
+
       backgroundColor:
         "#F4F7F4",
     },
 
+
     content: {
-      paddingBottom: 50,
+      paddingBottom:
+        50,
     },
+
 
     header: {
       backgroundColor:
         "#164B2A",
 
-      paddingHorizontal: 20,
+      paddingHorizontal:
+        20,
 
-      paddingTop: 28,
+      paddingTop:
+        28,
 
-      paddingBottom: 26,
+      paddingBottom:
+        26,
     },
+
 
     backButton: {
       color:
         "#D8E7DC",
 
-      fontSize: 16,
+      fontSize:
+        16,
 
-      marginBottom: 16,
+      marginBottom:
+        16,
     },
+
 
     title: {
       color:
         "#FFFFFF",
 
-      fontSize: 26,
+      fontSize:
+        26,
 
       fontWeight:
         "bold",
     },
 
-    subtitle: {
-      marginTop: 5,
 
-      fontSize: 14,
+    subtitle: {
+      marginTop:
+        5,
+
+      fontSize:
+        14,
 
       color:
         "#D8E7DC",
     },
 
-    section: {
-      marginTop: 24,
 
-      paddingHorizontal: 20,
+    section: {
+      marginTop:
+        24,
+
+      paddingHorizontal:
+        20,
     },
 
+
     sectionTitle: {
-      fontSize: 19,
+      fontSize:
+        19,
 
       fontWeight:
         "bold",
@@ -2172,34 +3181,47 @@ const styles =
       color:
         "#1D2A21",
 
-      marginBottom: 12,
+      marginBottom:
+        12,
     },
+
 
     card: {
       backgroundColor:
         "#FFFFFF",
 
-      borderRadius: 16,
+      borderRadius:
+        16,
 
-      padding: 24,
+      padding:
+        22,
 
       alignItems:
         "center",
     },
+
 
     formCard: {
       alignItems:
         "stretch",
     },
 
-    icon: {
-      fontSize: 38,
 
-      marginBottom: 12,
+    icon: {
+      fontSize:
+        38,
+
+      textAlign:
+        "center",
+
+      marginBottom:
+        10,
     },
 
+
     cardTitle: {
-      fontSize: 17,
+      fontSize:
+        17,
 
       fontWeight:
         "bold",
@@ -2209,12 +3231,18 @@ const styles =
 
       textAlign:
         "center",
+
+      marginTop:
+        10,
     },
 
-    cardText: {
-      marginTop: 7,
 
-      fontSize: 14,
+    cardText: {
+      marginTop:
+        7,
+
+      fontSize:
+        14,
 
       color:
         "#667168",
@@ -2222,204 +3250,125 @@ const styles =
       textAlign:
         "center",
 
-      lineHeight: 20,
+      lineHeight:
+        20,
     },
+
 
     previewImage: {
       width:
         "100%",
 
-      height: 220,
+      height:
+        220,
 
-      borderRadius: 12,
+      borderRadius:
+        12,
 
-      marginBottom: 14,
+      marginBottom:
+        14,
     },
 
-    successRow: {
-      flexDirection:
-        "row",
-
-      alignItems:
-        "center",
-    },
-
-    successPoint: {
-      width: 10,
-
-      height: 10,
-
-      borderRadius: 5,
-
-      backgroundColor:
-        "#21894A",
-
-      marginRight: 7,
-    },
 
     successText: {
-      fontSize: 15,
+      fontSize:
+        15,
 
       fontWeight:
         "bold",
 
       color:
         "#21894A",
+
+      textAlign:
+        "center",
     },
 
-    photoOrigin: {
-      fontSize: 12,
+
+    smallText: {
+      marginTop:
+        5,
 
       color:
         "#6B756E",
 
-      marginTop: 5,
+      fontSize:
+        12,
+
+      textAlign:
+        "center",
     },
 
-    primaryPhotoButton: {
-      marginTop: 18,
+
+    primaryButton: {
+      marginTop:
+        18,
 
       backgroundColor:
         "#21894A",
 
-      borderRadius: 10,
+      borderRadius:
+        10,
 
-      paddingVertical: 13,
+      paddingVertical:
+        13,
 
-      paddingHorizontal: 28,
-
-      minWidth: 210,
+      paddingHorizontal:
+        25,
 
       alignItems:
         "center",
     },
 
-    primaryPhotoButtonText: {
+
+    primaryButtonText: {
       color:
         "#FFFFFF",
 
-      fontSize: 15,
+      fontSize:
+        15,
 
       fontWeight:
         "bold",
     },
 
+
     secondaryButton: {
-      marginTop: 12,
+      marginTop:
+        12,
 
       backgroundColor:
         "#E5F2E9",
 
-      borderRadius: 10,
+      borderRadius:
+        10,
 
-      paddingVertical: 12,
+      paddingVertical:
+        12,
 
-      paddingHorizontal: 24,
-
-      minWidth: 190,
+      paddingHorizontal:
+        22,
 
       alignItems:
         "center",
     },
+
 
     secondaryButtonText: {
       color:
         "#21894A",
 
-      fontSize: 15,
+      fontSize:
+        14,
 
       fontWeight:
         "bold",
     },
 
-    loadingRow: {
-      flexDirection:
-        "row",
-
-      alignItems:
-        "center",
-
-      gap: 8,
-    },
-
-    locationData: {
-      flexDirection:
-        "row",
-
-      width:
-        "100%",
-
-      backgroundColor:
-        "#F4F7F4",
-
-      borderRadius: 12,
-
-      paddingVertical: 16,
-
-      marginTop: 18,
-    },
-
-    locationItem: {
-      flex: 1,
-
-      alignItems:
-        "center",
-    },
-
-    locationDivider: {
-      width: 1,
-
-      backgroundColor:
-        "#D5DDD7",
-    },
-
-    locationLabel: {
-      fontSize: 12,
-
-      color:
-        "#6B756E",
-    },
-
-    locationValue: {
-      marginTop: 5,
-
-      fontSize: 15,
-
-      fontWeight:
-        "bold",
-
-      color:
-        "#1D2A21",
-    },
-
-    accuracyBox: {
-      marginTop: 12,
-
-      alignItems:
-        "center",
-    },
-
-    accuracyLabel: {
-      fontSize: 12,
-
-      color:
-        "#6B756E",
-    },
-
-    accuracyValue: {
-      marginTop: 3,
-
-      fontSize: 14,
-
-      fontWeight:
-        "600",
-
-      color:
-        "#1D2A21",
-    },
 
     inputLabel: {
-      fontSize: 14,
+      fontSize:
+        14,
 
       fontWeight:
         "bold",
@@ -2427,12 +3376,16 @@ const styles =
       color:
         "#1D2A21",
 
-      marginBottom: 7,
+      marginBottom:
+        7,
     },
 
+
     secondInputLabel: {
-      marginTop: 18,
+      marginTop:
+        18,
     },
+
 
     input: {
       width:
@@ -2441,378 +3394,409 @@ const styles =
       backgroundColor:
         "#F4F7F4",
 
-      borderWidth: 1,
+      borderWidth:
+        1,
 
       borderColor:
         "#D8E0DA",
 
-      borderRadius: 10,
+      borderRadius:
+        10,
 
-      paddingHorizontal: 14,
+      paddingHorizontal:
+        14,
 
-      paddingVertical: 13,
+      paddingVertical:
+        13,
 
-      fontSize: 16,
+      fontSize:
+        16,
 
       color:
         "#1D2A21",
     },
 
-    fieldHelp: {
-      marginTop: 15,
 
-      fontSize: 12,
+    locationStatus: {
+      backgroundColor:
+        "#EAF5ED",
 
-      lineHeight: 18,
+      borderRadius:
+        12,
 
+      padding:
+        14,
+    },
+
+
+    locationStatusTitle: {
       color:
-        "#778078",
+        "#164B2A",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "bold",
     },
 
-    statusRow: {
-      flexDirection:
-        "row",
 
-      justifyContent:
-        "space-between",
-
-      width:
-        "100%",
-
-      marginTop: 20,
-    },
-
-    statusItem: {
-      flexDirection:
-        "row",
-
-      alignItems:
-        "center",
-    },
-
-    statusPoint: {
-      width: 11,
-
-      height: 11,
-
-      borderRadius: 6,
-
-      marginRight: 6,
-    },
-
-    green: {
-      backgroundColor:
-        "#2E9D50",
-    },
-
-    yellow: {
-      backgroundColor:
-        "#E0A82E",
-    },
-
-    red: {
-      backgroundColor:
-        "#D63E3E",
-    },
-
-    statusLabel: {
-      fontSize: 13,
+    locationStatusText: {
+      marginTop:
+        5,
 
       color:
         "#526157",
+
+      fontSize:
+        12,
+
+      lineHeight:
+        17,
     },
 
-    heightRules: {
-      marginTop: 20,
 
-      fontSize: 12,
-
-      color:
-        "#778078",
-
-      textAlign:
-        "center",
-
-      lineHeight: 19,
-    },
-
-    analyzeButton: {
-      marginHorizontal: 20,
-
-      marginTop: 28,
-
-      backgroundColor:
-        "#21894A",
-
-      paddingVertical: 16,
-
-      borderRadius: 14,
-
-      alignItems:
-        "center",
-    },
-
-    analyzeButtonDisabled: {
-      backgroundColor:
-        "#A7B6AA",
-    },
-
-    analyzeButtonText: {
-      color:
-        "#FFFFFF",
-
-      fontSize: 17,
-
-      fontWeight:
-        "bold",
-    },
-
-    saveButton: {
-      marginHorizontal: 20,
-
-      marginTop: 28,
-
-      backgroundColor:
-        "#164B2A",
-
-      paddingVertical: 16,
-
-      borderRadius: 14,
-
-      alignItems:
-        "center",
-    },
-
-    saveButtonText: {
-      color:
-        "#FFFFFF",
-
-      fontSize: 17,
-
-      fontWeight:
-        "bold",
-    },
-
-    retryButton: {
-      marginHorizontal: 20,
-
-      marginTop: 20,
-
-      backgroundColor:
-        "#E5F2E9",
-
-      paddingVertical: 15,
-
-      borderRadius: 14,
-
-      alignItems:
-        "center",
-    },
-
-    retryButtonText: {
-      color:
-        "#21894A",
-
-      fontSize: 16,
-
-      fontWeight:
-        "bold",
-    },
-
-    helpText: {
-      marginHorizontal: 30,
-
-      marginTop: 12,
-
-      color:
-        "#778078",
-
-      fontSize: 12,
-
-      textAlign:
-        "center",
-    },
-
-    readyText: {
-      marginHorizontal: 30,
-
-      marginTop: 12,
+    qualityText: {
+      marginTop:
+        5,
 
       color:
         "#21894A",
 
-      fontSize: 12,
+      fontSize:
+        11,
 
       fontWeight:
         "600",
-
-      textAlign:
-        "center",
     },
+
+
+    coordinatesBox: {
+      marginTop:
+        12,
+
+      backgroundColor:
+        "#F4F7F4",
+
+      padding:
+        12,
+
+      borderRadius:
+        10,
+    },
+
+
+    coordinateText: {
+      color:
+        "#526157",
+
+      fontSize:
+        12,
+
+      marginVertical:
+        2,
+    },
+
+
+    optionalBox: {
+      marginTop:
+        18,
+
+      borderTopWidth:
+        1,
+
+      borderTopColor:
+        "#E1E7E2",
+
+      paddingTop:
+        18,
+    },
+
+
+    optionalTitle: {
+      color:
+        "#1D2A21",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    optionalHelp: {
+      color:
+        "#778078",
+
+      fontSize:
+        12,
+
+      lineHeight:
+        18,
+
+      marginTop:
+        5,
+
+      marginBottom:
+        16,
+    },
+
+
+    loadingLocation: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      marginTop:
+        15,
+
+      gap:
+        8,
+    },
+
+
+    loadingLocationText: {
+      color:
+        "#21894A",
+
+      fontSize:
+        12,
+
+      fontWeight:
+        "600",
+    },
+
 
     resultLabel: {
-      fontSize: 13,
-
       color:
         "#6B756E",
+
+      fontSize:
+        13,
     },
+
 
     resultBadge: {
-      marginTop: 12,
+      marginTop:
+        12,
 
-      paddingHorizontal: 22,
+      paddingHorizontal:
+        22,
 
-      paddingVertical: 10,
+      paddingVertical:
+        10,
 
-      borderRadius: 24,
+      borderRadius:
+        24,
     },
+
 
     resultNormal: {
       backgroundColor:
         "#2E9D50",
     },
 
+
     resultAttention: {
       backgroundColor:
         "#E0A82E",
     },
+
 
     resultCritical: {
       backgroundColor:
         "#D63E3E",
     },
 
+
     resultInconclusive: {
       backgroundColor:
         "#7A817C",
     },
 
+
     resultBadgeText: {
       color:
         "#FFFFFF",
 
-      fontSize: 18,
+      fontSize:
+        18,
 
       fontWeight:
         "bold",
     },
 
-    resultConfidence: {
-      marginTop: 10,
 
+    confidence: {
       color:
         "#526157",
 
-      fontSize: 14,
+      fontSize:
+        14,
 
       fontWeight:
         "600",
+
+      marginTop:
+        10,
     },
 
-    analyzingTitle: {
-      marginTop: 15,
 
-      fontSize: 18,
-
-      fontWeight:
-        "bold",
-
-      color:
-        "#1D2A21",
-    },
-
-    processingText: {
-      marginTop: 12,
-
-      fontSize: 12,
-
-      color:
-        "#778078",
-
-      textAlign:
-        "center",
-    },
-
-    aiDetails: {
+    aiBox: {
       width:
         "100%",
-
-      marginTop: 24,
 
       backgroundColor:
         "#F4F7F4",
 
-      borderRadius: 12,
+      borderRadius:
+        12,
 
-      padding: 16,
+      padding:
+        15,
+
+      marginTop:
+        20,
     },
 
-    aiDetailsTitle: {
-      fontSize: 14,
 
-      fontWeight:
-        "bold",
-
-      color:
-        "#1D2A21",
-
-      marginBottom: 10,
-    },
-
-    aiDetailRow: {
-      flexDirection:
-        "row",
-
-      justifyContent:
-        "space-between",
-
-      alignItems:
-        "center",
-
-      marginTop: 8,
-    },
-
-    aiDetailLabel: {
-      fontSize: 13,
-
-      color:
-        "#667168",
-    },
-
-    aiDetailValue: {
-      fontSize: 13,
-
-      fontWeight:
-        "bold",
-
-      color:
-        "#1D2A21",
-    },
-
-    probabilityBox: {
-      width:
-        "100%",
-
-      marginTop: 14,
-
-      borderWidth: 1,
-
-      borderColor:
-        "#E1E7E2",
-
-      borderRadius: 12,
-
-      padding: 16,
-    },
-
-    probabilityText: {
-      fontSize: 13,
-
+    aiText: {
       color:
         "#526157",
 
-      marginTop: 5,
+      fontSize:
+        12,
+
+      marginVertical:
+        3,
+    },
+
+
+    rules: {
+      color:
+        "#778078",
+
+      fontSize:
+        12,
+
+      lineHeight:
+        19,
+
+      textAlign:
+        "center",
+
+      marginTop:
+        20,
+    },
+
+
+    analyzeButton: {
+      marginHorizontal:
+        20,
+
+      marginTop:
+        28,
+
+      backgroundColor:
+        "#21894A",
+
+      paddingVertical:
+        16,
+
+      borderRadius:
+        14,
+
+      alignItems:
+        "center",
+    },
+
+
+    disabledButton: {
+      backgroundColor:
+        "#A7B6AA",
+    },
+
+
+    analyzeButtonText: {
+      color:
+        "#FFFFFF",
+
+      fontSize:
+        17,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    saveButton: {
+      marginHorizontal:
+        20,
+
+      marginTop:
+        28,
+
+      backgroundColor:
+        "#164B2A",
+
+      paddingVertical:
+        16,
+
+      borderRadius:
+        14,
+
+      alignItems:
+        "center",
+    },
+
+
+    saveButtonText: {
+      color:
+        "#FFFFFF",
+
+      fontSize:
+        17,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    secondaryBottomButton: {
+      marginHorizontal:
+        20,
+
+      marginTop:
+        20,
+
+      backgroundColor:
+        "#E5F2E9",
+
+      paddingVertical:
+        15,
+
+      borderRadius:
+        14,
+
+      alignItems:
+        "center",
+    },
+
+
+    secondaryBottomButtonText: {
+      color:
+        "#21894A",
+
+      fontSize:
+        16,
+
+      fontWeight:
+        "bold",
     },
 
   });
+
   

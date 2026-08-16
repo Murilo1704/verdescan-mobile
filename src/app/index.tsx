@@ -11,6 +11,8 @@ import {
 import MonitoramentoMap from "../components/MonitoramentoMap";
 
 import {
+  Alert,
+  Platform,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -19,19 +21,41 @@ import {
   View,
 } from "react-native";
 
-import { carregarOcorrencias } from "../services/storage";
-import { Ocorrencia } from "../types/Ocorrencia";
+import {
+  carregarOcorrencias,
+} from "../services/storage";
+
+import {
+  carregarUsuarioLogado,
+  fazerLogout,
+  UsuarioLogado,
+} from "../services/auth";
+
+import {
+  Ocorrencia,
+} from "../types/Ocorrencia";
 
 
 export default function HomeScreen() {
   const [
     ocorrencias,
     setOcorrencias,
-  ] = useState<Ocorrencia[]>([]);
+  ] =
+    useState<Ocorrencia[]>(
+      []
+    );
+
+  const [
+    usuario,
+    setUsuario,
+  ] =
+    useState<UsuarioLogado | null>(
+      null
+    );
 
 
   // =========================================================
-  // CARREGAR OCORRÊNCIAS SEMPRE QUE VOLTAR PARA A HOME
+  // CARREGAR DADOS
   // =========================================================
 
   useFocusEffect(
@@ -40,8 +64,15 @@ export default function HomeScreen() {
         const dados =
           await carregarOcorrencias();
 
+        const usuarioAtual =
+          await carregarUsuarioLogado();
+
         setOcorrencias(
           dados
+        );
+
+        setUsuario(
+          usuarioAtual
         );
       }
 
@@ -51,11 +82,72 @@ export default function HomeScreen() {
 
 
   // =========================================================
-  // CONTADORES
+  // LOGOUT
+  // =========================================================
+
+  async function confirmarLogout() {
+    if (
+      Platform.OS ===
+      "web"
+    ) {
+      const confirmar =
+        window.confirm(
+          "Deseja sair do VerdeScan?"
+        );
+
+      if (!confirmar) {
+        return;
+      }
+
+      await sair();
+
+      return;
+    }
+
+
+    Alert.alert(
+      "Sair",
+      "Deseja sair do VerdeScan?",
+      [
+        {
+          text:
+            "Cancelar",
+
+          style:
+            "cancel",
+        },
+
+        {
+          text:
+            "Sair",
+
+          style:
+            "destructive",
+
+          onPress:
+            sair,
+        },
+      ]
+    );
+  }
+
+
+  async function sair() {
+    await fazerLogout();
+
+    router.replace(
+      "/login"
+    );
+  }
+
+
+  // =========================================================
+  // CONTADORES REAIS
   // =========================================================
 
   const totalMonitorados =
     ocorrencias.length;
+
 
   const totalCriticos =
     ocorrencias.filter(
@@ -65,9 +157,26 @@ export default function HomeScreen() {
     ).length;
 
 
+  const totalRodovias =
+    new Set(
+      ocorrencias.map(
+        (ocorrencia) =>
+          ocorrencia.rodovia
+            .trim()
+            .toUpperCase()
+      )
+    ).size;
+
+
+  // =========================================================
+  // INTERFACE
+  // =========================================================
+
   return (
     <SafeAreaView
-      style={styles.container}
+      style={
+        styles.container
+      }
     >
       <ScrollView
         contentContainerStyle={
@@ -80,20 +189,97 @@ export default function HomeScreen() {
         ================================================== */}
 
         <View
-          style={styles.header}
+          style={
+            styles.header
+          }
         >
-          <Text
-            style={styles.logo}
+          <View
+            style={
+              styles.headerTop
+            }
           >
-            VERDESCAN
-          </Text>
+            <View
+              style={
+                styles.headerCopy
+              }
+            >
+              <Text
+                style={
+                  styles.logo
+                }
+              >
+                VERDESCAN
+              </Text>
 
-          <Text
-            style={styles.subtitle}
+              <Text
+                style={
+                  styles.subtitle
+                }
+              >
+                Monitoramento inteligente
+                de vegetação
+              </Text>
+            </View>
+
+
+            <TouchableOpacity
+              style={
+                styles.logoutButton
+              }
+              onPress={
+                confirmarLogout
+              }
+            >
+              <Text
+                style={
+                  styles.logoutButtonText
+                }
+              >
+                Sair
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+
+          <View
+            style={
+              styles.operatorBox
+            }
           >
-            Monitoramento inteligente
-            de vegetação
-          </Text>
+            <View
+              style={
+                styles.operatorAvatar
+              }
+            >
+              <Text
+                style={
+                  styles.operatorAvatarText
+                }
+              >
+                OM
+              </Text>
+            </View>
+
+
+            <View>
+              <Text
+                style={
+                  styles.operatorLabel
+                }
+              >
+                Operador conectado
+              </Text>
+
+              <Text
+                style={
+                  styles.operatorName
+                }
+              >
+                {usuario?.nome ??
+                  "Operador Master"}
+              </Text>
+            </View>
+          </View>
         </View>
 
 
@@ -102,7 +288,9 @@ export default function HomeScreen() {
         ================================================== */}
 
         <Text
-          style={styles.sectionTitle}
+          style={
+            styles.sectionTitle
+          }
         >
           Visão geral
         </Text>
@@ -114,14 +302,18 @@ export default function HomeScreen() {
           }
         >
           <View
-            style={styles.card}
+            style={
+              styles.card
+            }
           >
             <Text
               style={
                 styles.cardNumber
               }
             >
-              {totalMonitorados}
+              {
+                totalMonitorados
+              }
             </Text>
 
             <Text
@@ -135,7 +327,9 @@ export default function HomeScreen() {
 
 
           <View
-            style={styles.card}
+            style={
+              styles.card
+            }
           >
             <Text
               style={[
@@ -143,7 +337,9 @@ export default function HomeScreen() {
                 styles.criticalNumber,
               ]}
             >
-              {totalCriticos}
+              {
+                totalCriticos
+              }
             </Text>
 
             <Text
@@ -162,25 +358,31 @@ export default function HomeScreen() {
         ================================================== */}
 
         <Text
-          style={styles.sectionTitle}
+          style={
+            styles.sectionTitle
+          }
         >
           Mapa de monitoramento
         </Text>
 
 
         <View
-          style={styles.mapWrapper}
+          style={
+            styles.mapWrapper
+          }
         >
-          <MonitoramentoMap />
+          <MonitoramentoMap
+            ocorrencias={
+              ocorrencias
+            }
+          />
         </View>
 
 
-        {/* ==================================================
-            LEGENDA
-        ================================================== */}
-
         <View
-          style={styles.legend}
+          style={
+            styles.legend
+          }
         >
           <View
             style={
@@ -274,7 +476,7 @@ export default function HomeScreen() {
 
 
         {/* ==================================================
-            PONTOS PRIORITÁRIOS
+            GESTÃO
         ================================================== */}
 
         <Text
@@ -286,10 +488,91 @@ export default function HomeScreen() {
         </Text>
 
 
+        {/* TRECHOS MONITORADOS */}
+
         <TouchableOpacity
           style={
-            styles.priorityAccessCard
+            styles.managementCard
           }
+          onPress={() =>
+            router.push(
+              "/rodovias"
+            )
+          }
+        >
+          <View
+            style={
+              styles.managementLeft
+            }
+          >
+            <View
+              style={
+                styles.roadIconBox
+              }
+            >
+              <Text
+                style={
+                  styles.roadIcon
+                }
+              >
+                R
+              </Text>
+            </View>
+
+
+            <View
+              style={
+                styles.managementText
+              }
+            >
+              <Text
+                style={
+                  styles.managementTitle
+                }
+              >
+                Trechos monitorados
+              </Text>
+
+              <Text
+                style={
+                  styles.managementDescription
+                }
+              >
+                Consulte o histórico
+                agrupado por rodovia.
+              </Text>
+
+              <Text
+                style={
+                  styles.managementExtra
+                }
+              >
+                {totalRodovias}{" "}
+                {totalRodovias === 1
+                  ? "rodovia registrada"
+                  : "rodovias registradas"}
+              </Text>
+            </View>
+          </View>
+
+
+          <Text
+            style={
+              styles.arrow
+            }
+          >
+            ›
+          </Text>
+        </TouchableOpacity>
+
+
+        {/* PONTOS PRIORITÁRIOS */}
+
+        <TouchableOpacity
+          style={[
+            styles.managementCard,
+            styles.secondManagementCard,
+          ]}
           onPress={() =>
             router.push(
               "/prioridades"
@@ -298,7 +581,7 @@ export default function HomeScreen() {
         >
           <View
             style={
-              styles.priorityAccessLeft
+              styles.managementLeft
             }
           >
             <View
@@ -318,12 +601,12 @@ export default function HomeScreen() {
 
             <View
               style={
-                styles.priorityAccessText
+                styles.managementText
               }
             >
               <Text
                 style={
-                  styles.priorityAccessTitle
+                  styles.managementTitle
                 }
               >
                 Pontos prioritários
@@ -331,12 +614,23 @@ export default function HomeScreen() {
 
               <Text
                 style={
-                  styles.priorityAccessDescription
+                  styles.managementDescription
                 }
               >
                 Consulte ocorrências por
                 período e exporte os dados
                 em CSV.
+              </Text>
+
+              <Text
+                style={
+                  styles.managementExtraCritical
+                }
+              >
+                {totalCriticos}{" "}
+                {totalCriticos === 1
+                  ? "ponto crítico"
+                  : "pontos críticos"}
               </Text>
             </View>
           </View>
@@ -389,7 +683,34 @@ export default function HomeScreen() {
                   styles.summaryValue
                 }
               >
-                {totalMonitorados}
+                {
+                  totalMonitorados
+                }
+              </Text>
+            </View>
+
+
+            <View
+              style={
+                styles.summaryRow
+              }
+            >
+              <Text
+                style={
+                  styles.summaryLabel
+                }
+              >
+                Rodovias monitoradas
+              </Text>
+
+              <Text
+                style={
+                  styles.summaryValue
+                }
+              >
+                {
+                  totalRodovias
+                }
               </Text>
             </View>
 
@@ -413,7 +734,9 @@ export default function HomeScreen() {
                   styles.summaryCritical,
                 ]}
               >
-                {totalCriticos}
+                {
+                  totalCriticos
+                }
               </Text>
             </View>
           </View>
@@ -425,9 +748,9 @@ export default function HomeScreen() {
 }
 
 
-// ===========================================================
+// ============================================================
 // ESTILOS
-// ===========================================================
+// ============================================================
 
 const styles =
   StyleSheet.create({
@@ -445,19 +768,34 @@ const styles =
     },
 
 
-    // =======================================================
-    // HEADER
-    // =======================================================
-
     header: {
       backgroundColor:
         "#164B2A",
 
       paddingHorizontal: 22,
 
-      paddingTop: 30,
+      paddingTop: 24,
 
-      paddingBottom: 28,
+      paddingBottom: 24,
+    },
+
+
+    headerTop: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "flex-start",
+
+      justifyContent:
+        "space-between",
+    },
+
+
+    headerCopy: {
+      flex: 1,
+
+      paddingRight: 15,
     },
 
 
@@ -482,9 +820,103 @@ const styles =
     },
 
 
-    // =======================================================
-    // TÍTULOS
-    // =======================================================
+    logoutButton: {
+      borderWidth: 1,
+
+      borderColor:
+        "rgba(255,255,255,0.30)",
+
+      borderRadius: 10,
+
+      paddingHorizontal: 15,
+
+      paddingVertical: 9,
+
+      backgroundColor:
+        "rgba(255,255,255,0.10)",
+    },
+
+
+    logoutButtonText: {
+      color:
+        "#FFFFFF",
+
+      fontSize: 13,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    operatorBox: {
+      marginTop: 20,
+
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
+      backgroundColor:
+        "rgba(255,255,255,0.09)",
+
+      borderRadius: 13,
+
+      padding: 12,
+    },
+
+
+    operatorAvatar: {
+      width: 40,
+
+      height: 40,
+
+      borderRadius: 20,
+
+      backgroundColor:
+        "#21894A",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      marginRight: 11,
+    },
+
+
+    operatorAvatarText: {
+      color:
+        "#FFFFFF",
+
+      fontWeight:
+        "bold",
+
+      fontSize: 13,
+    },
+
+
+    operatorLabel: {
+      color:
+        "#AAC7B3",
+
+      fontSize: 11,
+    },
+
+
+    operatorName: {
+      color:
+        "#FFFFFF",
+
+      fontSize: 14,
+
+      fontWeight:
+        "bold",
+
+      marginTop: 2,
+    },
+
 
     sectionTitle: {
       fontSize: 20,
@@ -502,10 +934,6 @@ const styles =
       marginBottom: 12,
     },
 
-
-    // =======================================================
-    // CARDS VISÃO GERAL
-    // =======================================================
 
     cardsContainer: {
       flexDirection:
@@ -555,10 +983,6 @@ const styles =
       marginTop: 4,
     },
 
-
-    // =======================================================
-    // MAPA
-    // =======================================================
 
     mapWrapper: {
       marginHorizontal: 20,
@@ -624,10 +1048,6 @@ const styles =
     },
 
 
-    // =======================================================
-    // NOVA ANÁLISE
-    // =======================================================
-
     analyzeButton: {
       marginHorizontal: 20,
 
@@ -656,11 +1076,7 @@ const styles =
     },
 
 
-    // =======================================================
-    // ACESSO AOS PONTOS PRIORITÁRIOS
-    // =======================================================
-
-    priorityAccessCard: {
+    managementCard: {
       marginHorizontal: 20,
 
       backgroundColor:
@@ -681,7 +1097,12 @@ const styles =
     },
 
 
-    priorityAccessLeft: {
+    secondManagementCard: {
+      marginTop: 12,
+    },
+
+
+    managementLeft: {
       flex: 1,
 
       flexDirection:
@@ -689,6 +1110,42 @@ const styles =
 
       alignItems:
         "center",
+    },
+
+
+    managementText: {
+      flex: 1,
+    },
+
+
+    roadIconBox: {
+      width: 46,
+
+      height: 46,
+
+      borderRadius: 23,
+
+      backgroundColor:
+        "#E5F2E9",
+
+      alignItems:
+        "center",
+
+      justifyContent:
+        "center",
+
+      marginRight: 14,
+    },
+
+
+    roadIcon: {
+      color:
+        "#21894A",
+
+      fontSize: 19,
+
+      fontWeight:
+        "bold",
     },
 
 
@@ -723,12 +1180,7 @@ const styles =
     },
 
 
-    priorityAccessText: {
-      flex: 1,
-    },
-
-
-    priorityAccessTitle: {
+    managementTitle: {
       fontSize: 17,
 
       fontWeight:
@@ -739,7 +1191,7 @@ const styles =
     },
 
 
-    priorityAccessDescription: {
+    managementDescription: {
       marginTop: 4,
 
       fontSize: 13,
@@ -748,6 +1200,32 @@ const styles =
 
       color:
         "#6B756E",
+    },
+
+
+    managementExtra: {
+      marginTop: 6,
+
+      fontSize: 11,
+
+      fontWeight:
+        "600",
+
+      color:
+        "#21894A",
+    },
+
+
+    managementExtraCritical: {
+      marginTop: 6,
+
+      fontSize: 11,
+
+      fontWeight:
+        "600",
+
+      color:
+        "#D63E3E",
     },
 
 
@@ -760,10 +1238,6 @@ const styles =
       marginLeft: 10,
     },
 
-
-    // =======================================================
-    // RESUMO
-    // =======================================================
 
     summaryCard: {
       marginHorizontal: 20,
@@ -831,4 +1305,5 @@ const styles =
     },
 
   });
+
   

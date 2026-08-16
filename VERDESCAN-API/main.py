@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 import tensorflow as tf
 from tensorflow import keras
@@ -10,6 +11,11 @@ from PIL import Image
 from io import BytesIO
 
 import os
+
+from localizacao_rodovia import (
+    localizar_rodovia_km,
+    listar_rodovias,
+)
 
 
 # ============================================================
@@ -156,6 +162,15 @@ app.add_middleware(
 
 
 # ============================================================
+# MODELO DE REQUISIÇÃO - LOCALIZAÇÃO POR RODOVIA + KM
+# ============================================================
+
+class LocalizarTrechoRequest(BaseModel):
+    rodovia: str
+    km: float
+
+
+# ============================================================
 # HOME
 # ============================================================
 
@@ -166,6 +181,47 @@ def home():
         "projeto": "VerdeScan",
         "segmentacao": "carregada",
         "classificacao": "carregada"
+    }
+
+
+# ============================================================
+# RODOVIAS SUPORTADAS
+# ============================================================
+
+@app.get("/rodovias-suportadas")
+def rodovias_suportadas():
+    return {
+        "status": "sucesso",
+        "rodovias": listar_rodovias(),
+    }
+
+
+# ============================================================
+# LOCALIZAR TRECHO POR RODOVIA + KM
+# ============================================================
+
+@app.post("/localizar-trecho")
+def localizar_trecho(
+    dados: LocalizarTrechoRequest
+):
+    resultado = localizar_rodovia_km(
+        dados.rodovia,
+        dados.km,
+    )
+
+    if resultado is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Não foi possível localizar esse trecho. "
+                "Verifique se a rodovia está cadastrada e se "
+                "o KM está dentro da faixa atualmente mapeada."
+            )
+        )
+
+    return {
+        "status": "sucesso",
+        **resultado,
     }
 
 
@@ -282,27 +338,33 @@ def analisar_imagem(
             "status": "inconclusivo",
             "classe": "INCONCLUSIVO",
             "confianca": 0.0,
+
             "vegetacao_total":
                 round(
                     pct_vegetacao,
                     2
                 ),
+
             "vegetacao_baixa":
                 round(
                     pct_low,
                     2
                 ),
+
             "vegetacao_alta":
                 round(
                     pct_high,
                     2
                 ),
+
             "background":
                 round(
                     pct_background,
                     2
                 ),
+
             "patches_analisados": 0,
+
             "probabilidades": {
                 "ATENCAO": 0.0,
                 "CRITICO": 0.0,
@@ -418,8 +480,6 @@ def analisar_imagem(
                 * 100
             )
 
-            # Ignorar patch
-            # com pouca vegetação
             if cobertura < 30:
                 continue
 
@@ -482,28 +542,34 @@ def analisar_imagem(
             "status": "inconclusivo",
             "classe": "INCONCLUSIVO",
             "confianca": 0.0,
+
             "vegetacao_total":
                 round(
                     pct_vegetacao,
                     2
                 ),
+
             "vegetacao_baixa":
                 round(
                     pct_low,
                     2
                 ),
+
             "vegetacao_alta":
                 round(
                     pct_high,
                     2
                 ),
+
             "background":
                 round(
                     pct_background,
                     2
                 ),
+
             "patches_analisados":
                 patches_validos,
+
             "probabilidades": {
                 "ATENCAO": 0.0,
                 "CRITICO": 0.0,
@@ -522,8 +588,6 @@ def analisar_imagem(
         )
     )
 
-    # Mediana reduz o impacto
-    # de patches fora do padrão
     prob_final = np.median(
         probabilidades_patches,
         axis=0
@@ -659,7 +723,9 @@ async def analisar(
 
         raise HTTPException(
             status_code=400,
-            detail="O arquivo enviado precisa ser uma imagem."
+            detail=(
+                "O arquivo enviado precisa ser uma imagem."
+            )
         )
 
 
@@ -707,4 +773,5 @@ async def analisar(
                 "a imagem."
             )
         )
+
     
