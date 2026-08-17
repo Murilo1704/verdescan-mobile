@@ -10,7 +10,9 @@ import {
 } from "react";
 
 import {
+  Alert,
   Image,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -21,12 +23,17 @@ import {
 
 import {
   carregarOcorrencias,
+  removerOcorrencia,
 } from "../services/storage";
 
 import {
   Ocorrencia,
 } from "../types/Ocorrencia";
 
+
+// ============================================================
+// FORMATAR DATA
+// ============================================================
 
 function formatarDataHora(
   dataIso: string
@@ -71,6 +78,10 @@ function formatarDataHora(
 }
 
 
+// ============================================================
+// CLASSE
+// ============================================================
+
 function nomeClasse(
   classe:
     Ocorrencia["classe"]
@@ -82,6 +93,7 @@ function nomeClasse(
     return "CRÍTICO";
   }
 
+
   if (
     classe ===
     "ATENCAO"
@@ -89,9 +101,14 @@ function nomeClasse(
     return "ATENÇÃO";
   }
 
+
   return "NORMAL";
 }
 
+
+// ============================================================
+// STATUS
+// ============================================================
 
 function nomeStatus(
   status:
@@ -104,6 +121,7 @@ function nomeStatus(
     return "EM ANDAMENTO";
   }
 
+
   if (
     status ===
     "CONCLUIDO"
@@ -111,11 +129,17 @@ function nomeStatus(
     return "CONCLUÍDO";
   }
 
+
   return "PENDENTE";
 }
 
 
+// ============================================================
+// TELA
+// ============================================================
+
 export default function TrechoDetalhesScreen() {
+
   const params =
     useLocalSearchParams<{
       rodovia?: string;
@@ -138,47 +162,182 @@ export default function TrechoDetalhesScreen() {
     );
 
 
+  // ==========================================================
+  // CARREGAR HISTÓRICO
+  // ==========================================================
+
+  const carregar = useCallback(
+    async () => {
+
+      const dados =
+        await carregarOcorrencias();
+
+
+      const filtradas =
+        dados
+          .filter(
+            (item) =>
+              item.rodovia
+                .trim()
+                .toUpperCase() ===
+              rodovia
+                .trim()
+                .toUpperCase()
+          )
+          .sort(
+            (a, b) =>
+              new Date(
+                b.data
+              ).getTime() -
+              new Date(
+                a.data
+              ).getTime()
+          );
+
+
+      setOcorrencias(
+        filtradas
+      );
+
+    },
+    [
+      rodovia,
+    ]
+  );
+
+
   useFocusEffect(
     useCallback(() => {
-      async function carregar() {
-        const dados =
-          await carregarOcorrencias();
+
+      carregar();
+
+    }, [
+      carregar,
+    ])
+  );
 
 
-        const filtradas =
-          dados
-            .filter(
-              (item) =>
-                item.rodovia
-                  .trim()
-                  .toUpperCase() ===
-                rodovia
-                  .trim()
-                  .toUpperCase()
-            )
-            .sort(
-              (a, b) =>
-                new Date(
-                  b.data
-                ).getTime() -
-                new Date(
-                  a.data
-                ).getTime()
-            );
+  // ==========================================================
+  // EXCLUIR
+  // ==========================================================
+
+  async function excluirOcorrencia(
+    id: string
+  ) {
+    try {
+
+      await removerOcorrencia(
+        id
+      );
 
 
-        setOcorrencias(
-          filtradas
+      setOcorrencias(
+        (dadosAtuais) =>
+          dadosAtuais.filter(
+            (item) =>
+              item.id !== id
+          )
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Erro ao excluir ocorrência:",
+        error
+      );
+
+
+      if (
+        Platform.OS ===
+        "web"
+      ) {
+        alert(
+          "Não foi possível excluir a ocorrência."
+        );
+
+        return;
+      }
+
+
+      Alert.alert(
+        "Erro",
+        "Não foi possível excluir a ocorrência."
+      );
+    }
+  }
+
+
+  // ==========================================================
+  // CONFIRMAR EXCLUSÃO
+  // ==========================================================
+
+  function confirmarExclusao(
+    ocorrencia:
+      Ocorrencia
+  ) {
+
+    const mensagem =
+      `Deseja excluir a ocorrência da ${rodovia} no KM ${ocorrencia.km}?`;
+
+
+    if (
+      Platform.OS ===
+      "web"
+    ) {
+
+      const confirmou =
+        window.confirm(
+          mensagem
+        );
+
+
+      if (
+        confirmou
+      ) {
+        excluirOcorrencia(
+          ocorrencia.id
         );
       }
 
 
-      carregar();
-    }, [
-      rodovia,
-    ])
-  );
+      return;
+    }
 
+
+    Alert.alert(
+      "Excluir ocorrência",
+      mensagem,
+      [
+        {
+          text:
+            "Cancelar",
+
+          style:
+            "cancel",
+        },
+
+        {
+          text:
+            "Excluir",
+
+          style:
+            "destructive",
+
+          onPress:
+            () =>
+              excluirOcorrencia(
+                ocorrencia.id
+              ),
+        },
+      ]
+    );
+  }
+
+
+  // ==========================================================
+  // RESUMO
+  // ==========================================================
 
   const totalCriticos =
     ocorrencias.filter(
@@ -188,12 +347,17 @@ export default function TrechoDetalhesScreen() {
     ).length;
 
 
+  // ==========================================================
+  // INTERFACE
+  // ==========================================================
+
   return (
     <SafeAreaView
       style={
         styles.container
       }
     >
+
       <ScrollView
         contentContainerStyle={
           styles.content
@@ -207,6 +371,7 @@ export default function TrechoDetalhesScreen() {
             styles.header
           }
         >
+
           <Pressable
             style={
               styles.backButton
@@ -215,6 +380,7 @@ export default function TrechoDetalhesScreen() {
               router.back()
             }
           >
+
             <Text
               style={
                 styles.backButtonText
@@ -222,6 +388,7 @@ export default function TrechoDetalhesScreen() {
             >
               ← Trechos
             </Text>
+
           </Pressable>
 
 
@@ -239,9 +406,9 @@ export default function TrechoDetalhesScreen() {
               styles.subtitle
             }
           >
-            Histórico de análises da
-            rodovia
+            Histórico de análises da rodovia
           </Text>
+
         </View>
 
 
@@ -252,11 +419,13 @@ export default function TrechoDetalhesScreen() {
             styles.summaryRow
           }
         >
+
           <View
             style={
               styles.summaryCard
             }
           >
+
             <Text
               style={
                 styles.summaryNumber
@@ -274,6 +443,7 @@ export default function TrechoDetalhesScreen() {
             >
               Análises
             </Text>
+
           </View>
 
 
@@ -282,6 +452,7 @@ export default function TrechoDetalhesScreen() {
               styles.summaryCard
             }
           >
+
             <Text
               style={[
                 styles.summaryNumber,
@@ -300,7 +471,9 @@ export default function TrechoDetalhesScreen() {
             >
               Críticas
             </Text>
+
           </View>
+
         </View>
 
 
@@ -315,228 +488,324 @@ export default function TrechoDetalhesScreen() {
         </Text>
 
 
-        {ocorrencias.length ===
-        0 ? (
-          <View
-            style={
-              styles.emptyCard
-            }
-          >
-            <Text
+        {
+          ocorrencias.length ===
+          0 ? (
+
+            <View
               style={
-                styles.emptyTitle
+                styles.emptyCard
               }
             >
-              Nenhuma análise encontrada
-            </Text>
-          </View>
 
-        ) : (
-          ocorrencias.map(
-            (ocorrencia) => (
-
-              <View
-                key={
-                  ocorrencia.id
-                }
+              <Text
                 style={
-                  styles.card
+                  styles.emptyTitle
                 }
               >
+                Nenhuma análise encontrada
+              </Text>
+
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
+                Novas análises desta rodovia aparecerão aqui.
+              </Text>
+
+            </View>
+
+          ) : (
+
+            ocorrencias.map(
+              (
+                ocorrencia
+              ) => (
 
                 <View
+                  key={
+                    ocorrencia.id
+                  }
                   style={
-                    styles.cardTop
+                    styles.card
                   }
                 >
-                  <View>
-                    <Text
-                      style={
-                        styles.km
-                      }
-                    >
-                      KM{" "}
-                      {
-                        ocorrencia.km
-                      }
-                    </Text>
 
-                    <Text
-                      style={
-                        styles.date
-                      }
-                    >
-                      {formatarDataHora(
-                        ocorrencia.data
-                      )}
-                    </Text>
-                  </View>
-
+                  {/* TOPO */}
 
                   <View
-                    style={[
-                      styles.badge,
+                    style={
+                      styles.cardTop
+                    }
+                  >
 
-                      ocorrencia.classe ===
-                      "CRITICO"
-                        ? styles.criticalBadge
-                        : ocorrencia.classe ===
+                    <View>
+
+                      <Text
+                        style={
+                          styles.km
+                        }
+                      >
+                        KM{" "}
+                        {
+                          ocorrencia.km
+                        }
+                      </Text>
+
+
+                      <Text
+                        style={
+                          styles.date
+                        }
+                      >
+                        {
+                          formatarDataHora(
+                            ocorrencia.data
+                          )
+                        }
+                      </Text>
+
+                    </View>
+
+
+                    <View
+                      style={[
+                        styles.badge,
+
+                        ocorrencia.classe ===
+                        "CRITICO"
+                          ?
+                          styles.criticalBadge
+
+                          :
+
+                          ocorrencia.classe ===
                           "ATENCAO"
-                          ? styles.attentionBadge
-                          : styles.normalBadge,
-                    ]}
+                            ?
+                            styles.attentionBadge
+
+                            :
+                            styles.normalBadge,
+                      ]}
+                    >
+
+                      <Text
+                        style={
+                          styles.badgeText
+                        }
+                      >
+                        {
+                          nomeClasse(
+                            ocorrencia.classe
+                          )
+                        }
+                      </Text>
+
+                    </View>
+
+                  </View>
+
+
+                  {/* DETALHES */}
+
+                  <View
+                    style={
+                      styles.detailsBox
+                    }
                   >
-                    <Text
+
+                    <View
                       style={
-                        styles.badgeText
+                        styles.detailRow
                       }
                     >
-                      {nomeClasse(
-                        ocorrencia.classe
-                      )}
-                    </Text>
+
+                      <Text
+                        style={
+                          styles.detailLabel
+                        }
+                      >
+                        Confiança IA
+                      </Text>
+
+
+                      <Text
+                        style={
+                          styles.detailValue
+                        }
+                      >
+                        {
+                          (
+                            ocorrencia
+                              .confianca *
+                            100
+                          ).toFixed(
+                            2
+                          )
+                        }
+                        %
+                      </Text>
+
+                    </View>
+
+
+                    <View
+                      style={
+                        styles.detailRow
+                      }
+                    >
+
+                      <Text
+                        style={
+                          styles.detailLabel
+                        }
+                      >
+                        Status
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.detailValue
+                        }
+                      >
+                        {
+                          nomeStatus(
+                            ocorrencia.status
+                          )
+                        }
+                      </Text>
+
+                    </View>
+
+
+                    <View
+                      style={
+                        styles.detailRow
+                      }
+                    >
+
+                      <Text
+                        style={
+                          styles.detailLabel
+                        }
+                      >
+                        Latitude
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.detailValue
+                        }
+                      >
+                        {
+                          ocorrencia.latitude
+                            .toFixed(
+                              6
+                            )
+                        }
+                      </Text>
+
+                    </View>
+
+
+                    <View
+                      style={
+                        styles.detailRow
+                      }
+                    >
+
+                      <Text
+                        style={
+                          styles.detailLabel
+                        }
+                      >
+                        Longitude
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.detailValue
+                        }
+                      >
+                        {
+                          ocorrencia.longitude
+                            .toFixed(
+                              6
+                            )
+                        }
+                      </Text>
+
+                    </View>
+
                   </View>
-                </View>
 
 
-                <View
-                  style={
-                    styles.detailsBox
+                  {/* FOTO */}
+
+                  {
+                    ocorrencia.imagem &&
+                    (
+                      <Image
+                        source={{
+                          uri:
+                            ocorrencia.imagem,
+                        }}
+                        style={
+                          styles.image
+                        }
+                      />
+                    )
                   }
-                >
-                  <View
+
+
+                  {/* EXCLUIR */}
+
+                  <Pressable
                     style={
-                      styles.detailRow
+                      styles.deleteButton
+                    }
+                    onPress={() =>
+                      confirmarExclusao(
+                        ocorrencia
+                      )
                     }
                   >
-                    <Text
-                      style={
-                        styles.detailLabel
-                      }
-                    >
-                      Confiança IA
-                    </Text>
 
                     <Text
                       style={
-                        styles.detailValue
+                        styles.deleteButtonText
                       }
                     >
-                      {(
-                        ocorrencia.confianca *
-                        100
-                      ).toFixed(
-                        2
-                      )}
-                      %
-                    </Text>
-                  </View>
-
-
-                  <View
-                    style={
-                      styles.detailRow
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.detailLabel
-                      }
-                    >
-                      Status
+                      Excluir ocorrência
                     </Text>
 
-                    <Text
-                      style={
-                        styles.detailValue
-                      }
-                    >
-                      {nomeStatus(
-                        ocorrencia.status
-                      )}
-                    </Text>
-                  </View>
+                  </Pressable>
 
-
-                  <View
-                    style={
-                      styles.detailRow
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.detailLabel
-                      }
-                    >
-                      Latitude
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.detailValue
-                      }
-                    >
-                      {ocorrencia.latitude.toFixed(
-                        6
-                      )}
-                    </Text>
-                  </View>
-
-
-                  <View
-                    style={
-                      styles.detailRow
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.detailLabel
-                      }
-                    >
-                      Longitude
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.detailValue
-                      }
-                    >
-                      {ocorrencia.longitude.toFixed(
-                        6
-                      )}
-                    </Text>
-                  </View>
                 </View>
 
-
-                {ocorrencia.imagem && (
-                  <Image
-                    source={{
-                      uri:
-                        ocorrencia.imagem,
-                    }}
-                    style={
-                      styles.image
-                    }
-                  />
-                )}
-
-              </View>
+              )
             )
           )
-        )}
+        }
 
       </ScrollView>
+
     </SafeAreaView>
   );
 }
 
 
+// ============================================================
+// ESTILOS
+// ============================================================
+
 const styles =
   StyleSheet.create({
 
     container: {
-      flex: 1,
+      flex:
+        1,
 
       backgroundColor:
         "#F4F7F4",
@@ -544,7 +813,8 @@ const styles =
 
 
     content: {
-      paddingBottom: 40,
+      paddingBottom:
+        40,
     },
 
 
@@ -552,11 +822,14 @@ const styles =
       backgroundColor:
         "#164B2A",
 
-      paddingHorizontal: 20,
+      paddingHorizontal:
+        20,
 
-      paddingTop: 20,
+      paddingTop:
+        20,
 
-      paddingBottom: 28,
+      paddingBottom:
+        28,
     },
 
 
@@ -564,16 +837,20 @@ const styles =
       alignSelf:
         "flex-start",
 
-      marginBottom: 18,
+      marginBottom:
+        18,
 
-      paddingVertical: 8,
+      paddingVertical:
+        8,
 
-      paddingHorizontal: 12,
+      paddingHorizontal:
+        12,
 
       backgroundColor:
         "rgba(255,255,255,0.12)",
 
-      borderRadius: 10,
+      borderRadius:
+        10,
     },
 
 
@@ -581,7 +858,8 @@ const styles =
       color:
         "#FFFFFF",
 
-      fontSize: 15,
+      fontSize:
+        15,
 
       fontWeight:
         "600",
@@ -592,7 +870,8 @@ const styles =
       color:
         "#FFFFFF",
 
-      fontSize: 24,
+      fontSize:
+        24,
 
       fontWeight:
         "bold",
@@ -600,12 +879,14 @@ const styles =
 
 
     subtitle: {
-      marginTop: 5,
+      marginTop:
+        5,
 
       color:
         "#D8E7DC",
 
-      fontSize: 14,
+      fontSize:
+        14,
     },
 
 
@@ -613,28 +894,35 @@ const styles =
       flexDirection:
         "row",
 
-      paddingHorizontal: 20,
+      paddingHorizontal:
+        20,
 
-      gap: 12,
+      gap:
+        12,
 
-      marginTop: 22,
+      marginTop:
+        22,
     },
 
 
     summaryCard: {
-      flex: 1,
+      flex:
+        1,
 
       backgroundColor:
         "#FFFFFF",
 
-      padding: 17,
+      padding:
+        17,
 
-      borderRadius: 14,
+      borderRadius:
+        14,
     },
 
 
     summaryNumber: {
-      fontSize: 25,
+      fontSize:
+        25,
 
       fontWeight:
         "bold",
@@ -651,9 +939,11 @@ const styles =
 
 
     summaryLabel: {
-      marginTop: 3,
+      marginTop:
+        3,
 
-      fontSize: 13,
+      fontSize:
+        13,
 
       color:
         "#6B756E",
@@ -661,13 +951,17 @@ const styles =
 
 
     sectionTitle: {
-      marginHorizontal: 20,
+      marginHorizontal:
+        20,
 
-      marginTop: 24,
+      marginTop:
+        24,
 
-      marginBottom: 12,
+      marginBottom:
+        12,
 
-      fontSize: 19,
+      fontSize:
+        19,
 
       fontWeight:
         "bold",
@@ -678,16 +972,20 @@ const styles =
 
 
     card: {
-      marginHorizontal: 20,
+      marginHorizontal:
+        20,
 
-      marginBottom: 14,
+      marginBottom:
+        14,
 
       backgroundColor:
         "#FFFFFF",
 
-      borderRadius: 16,
+      borderRadius:
+        16,
 
-      padding: 17,
+      padding:
+        17,
     },
 
 
@@ -704,7 +1002,8 @@ const styles =
 
 
     km: {
-      fontSize: 18,
+      fontSize:
+        18,
 
       fontWeight:
         "bold",
@@ -715,9 +1014,11 @@ const styles =
 
 
     date: {
-      marginTop: 4,
+      marginTop:
+        4,
 
-      fontSize: 12,
+      fontSize:
+        12,
 
       color:
         "#6B756E",
@@ -725,11 +1026,14 @@ const styles =
 
 
     badge: {
-      paddingHorizontal: 10,
+      paddingHorizontal:
+        10,
 
-      paddingVertical: 7,
+      paddingVertical:
+        7,
 
-      borderRadius: 20,
+      borderRadius:
+        20,
     },
 
 
@@ -755,7 +1059,8 @@ const styles =
       color:
         "#FFFFFF",
 
-      fontSize: 11,
+      fontSize:
+        11,
 
       fontWeight:
         "bold",
@@ -763,14 +1068,17 @@ const styles =
 
 
     detailsBox: {
-      marginTop: 15,
+      marginTop:
+        15,
 
       backgroundColor:
         "#F7F9F7",
 
-      borderRadius: 12,
+      borderRadius:
+        12,
 
-      padding: 13,
+      padding:
+        13,
     },
 
 
@@ -781,7 +1089,8 @@ const styles =
       justifyContent:
         "space-between",
 
-      paddingVertical: 5,
+      paddingVertical:
+        5,
     },
 
 
@@ -789,7 +1098,8 @@ const styles =
       color:
         "#6B756E",
 
-      fontSize: 12,
+      fontSize:
+        12,
     },
 
 
@@ -797,7 +1107,8 @@ const styles =
       color:
         "#1D2A21",
 
-      fontSize: 12,
+      fontSize:
+        12,
 
       fontWeight:
         "bold",
@@ -808,23 +1119,65 @@ const styles =
       width:
         "100%",
 
-      height: 180,
+      height:
+        180,
 
-      marginTop: 14,
+      marginTop:
+        14,
 
-      borderRadius: 12,
+      borderRadius:
+        12,
+    },
+
+
+    deleteButton: {
+      marginTop:
+        16,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#D63E3E",
+
+      backgroundColor:
+        "#FFF5F5",
+
+      borderRadius:
+        10,
+
+      paddingVertical:
+        12,
+
+      alignItems:
+        "center",
+    },
+
+
+    deleteButtonText: {
+      color:
+        "#C73232",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "bold",
     },
 
 
     emptyCard: {
-      marginHorizontal: 20,
+      marginHorizontal:
+        20,
 
       backgroundColor:
         "#FFFFFF",
 
-      padding: 24,
+      padding:
+        24,
 
-      borderRadius: 14,
+      borderRadius:
+        14,
 
       alignItems:
         "center",
@@ -832,13 +1185,29 @@ const styles =
 
 
     emptyTitle: {
-      fontSize: 16,
+      fontSize:
+        16,
 
       fontWeight:
         "bold",
 
       color:
         "#1D2A21",
+    },
+
+
+    emptyText: {
+      marginTop:
+        6,
+
+      color:
+        "#6B756E",
+
+      fontSize:
+        13,
+
+      textAlign:
+        "center",
     },
 
   });

@@ -1,0 +1,57 @@
+{
+    "versao": "VERDESCAN_V3_1",
+    "segmentacao": {
+        "arquivo": "VERDESCAN_SEGMENTACAO_FINAL_V3.keras",
+        "input": [
+            256,
+            384,
+            3
+        ],
+        "classes": {
+            "0": "BACKGROUND",
+            "1": "VEGETACAO_INTERESSE",
+            "2": "ARVORE"
+        }
+    },
+    "classificacao": {
+        "arquivo": "VERDESCAN_CLASSIFICADOR_ORDINAL_FINAL_V3_1.keras",
+        "tipo": "ordinal",
+        "input": [
+            224,
+            224,
+            3
+        ],
+        "classes": {
+            "0": "NORMAL",
+            "1": "ATENCAO",
+            "2": "CRITICO"
+        },
+        "faixas_operacionais": {
+            "NORMAL": "ate 10 cm",
+            "ATENCAO": "acima de 10 cm ate 30 cm",
+            "CRITICO": "acima de 30 cm"
+        },
+        "saidas_ordinais": {
+            "saida_0": "probabilidade_acima_de_NORMAL",
+            "saida_1": "probabilidade_acima_de_ATENCAO"
+        },
+        "limiares": {
+            "normal_para_atencao": 0.5,
+            "atencao_para_critico": 0.65
+        },
+        "regra_decisao": {
+            "NORMAL": "P(acima_NORMAL) < 0.50",
+            "ATENCAO": "P(acima_NORMAL) >= 0.50 e P(acima_ATENCAO) < 0.65",
+            "CRITICO": "P(acima_NORMAL) >= 0.50 e P(acima_ATENCAO) >= 0.65"
+        },
+        "prioridade_operacional": "Reduzir falsos CRITICOS, mas recuperar casos claramente altos. Em situações limítrofes, priorizar ATENCAO.",
+        "metricas_teste_limiar_70": {
+            "accuracy_percentual": 89.44,
+            "macro_f1_percentual": 89.43,
+            "normal_para_critico": 3,
+            "critico_para_normal": 2,
+            "recall_critico_percentual": 88.17,
+            "precision_critico_percentual": 95.83
+        }
+    }
+}

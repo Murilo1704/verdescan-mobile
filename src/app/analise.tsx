@@ -79,13 +79,29 @@ type ResultadoAnalise = {
 
   confianca: number;
 
+  confiancaPercentual: number;
+
+  nivelConfianca: string;
+
+  revisaoRecomendada: boolean;
+
+  motivoRevisao: string | null;
+
   vegetacaoTotal: number;
 
-  vegetacaoBaixa: number;
+  vegetacaoInteresse: number;
 
-  vegetacaoAlta: number;
+  arvore: number;
 
-  patchesAnalisados: number;
+  background: number;
+
+  pAcimaNormal: number;
+
+  pAcimaAtencao: number;
+
+  limiarAtencao: number;
+
+  limiarCritico: number;
 
   probabilidadeNormal: number;
 
@@ -98,27 +114,64 @@ type ResultadoAnalise = {
 type RespostaAPI = {
   status: string;
 
+  pipeline?: string;
+
   classe: ClasseAnalise;
 
   confianca: number;
 
   confianca_percentual?: number;
 
-  vegetacao_total: number;
+  nivel_confianca?: string;
 
-  vegetacao_baixa: number;
+  revisao_recomendada?: boolean;
 
-  vegetacao_alta: number;
+  motivo_revisao?: string | null;
+
+  vegetacao_total?: number;
+
+  vegetacao_interesse?: number;
+
+  arvore?: number;
 
   background?: number;
 
-  patches_analisados: number;
+  ordinal?: {
+    p_acima_normal?: number;
+
+    p_acima_normal_percentual?: number;
+
+    p_acima_atencao?: number;
+
+    p_acima_atencao_percentual?: number;
+
+    limiar_atencao?: number;
+
+    limiar_atencao_percentual?: number;
+
+    limiar_critico?: number;
+
+    limiar_critico_percentual?: number;
+  };
 
   probabilidades?: {
     ATENCAO?: number;
     CRITICO?: number;
     NORMAL?: number;
   };
+
+  probabilidades_percentuais?: {
+    ATENCAO?: number;
+    CRITICO?: number;
+    NORMAL?: number;
+  };
+
+  // Campos legados mantidos pela API durante a transição.
+  vegetacao_baixa?: number;
+
+  vegetacao_alta?: number;
+
+  patches_analisados?: number;
 
   arquivo?: string;
 };
@@ -1786,33 +1839,84 @@ export default function AnaliseScreen() {
           confianca:
             0,
 
+          confiancaPercentual:
+            0,
+
+          nivelConfianca:
+            resposta
+              .nivel_confianca ??
+            "BAIXA",
+
+          revisaoRecomendada:
+            true,
+
+          motivoRevisao:
+            resposta
+              .motivo_revisao ??
+            "Pouca vegetação de interesse foi identificada na imagem.",
+
           vegetacaoTotal:
             resposta
               .vegetacao_total ??
             0,
 
-          vegetacaoBaixa:
+          vegetacaoInteresse:
             resposta
-              .vegetacao_baixa ??
+              .vegetacao_interesse ??
+            resposta
+              .vegetacao_total ??
             0,
 
-          vegetacaoAlta:
+          arvore:
             resposta
-              .vegetacao_alta ??
+              .arvore ??
             0,
 
-          patchesAnalisados:
+          background:
             resposta
-              .patches_analisados ??
+              .background ??
             0,
+
+          pAcimaNormal:
+            resposta
+              .ordinal
+              ?.p_acima_normal ??
+            0,
+
+          pAcimaAtencao:
+            resposta
+              .ordinal
+              ?.p_acima_atencao ??
+            0,
+
+          limiarAtencao:
+            resposta
+              .ordinal
+              ?.limiar_atencao ??
+            0.5,
+
+          limiarCritico:
+            resposta
+              .ordinal
+              ?.limiar_critico ??
+            0.65,
 
           probabilidadeNormal:
+            resposta
+              .probabilidades
+              ?.NORMAL ??
             0,
 
           probabilidadeAtencao:
+            resposta
+              .probabilidades
+              ?.ATENCAO ??
             0,
 
           probabilidadeCritico:
+            resposta
+              .probabilidades
+              ?.CRITICO ??
             0,
         });
 
@@ -1850,21 +1954,74 @@ export default function AnaliseScreen() {
         confianca:
           resposta.confianca,
 
+        confiancaPercentual:
+          resposta
+            .confianca_percentual ??
+          (
+            resposta.confianca *
+            100
+          ),
+
+        nivelConfianca:
+          resposta
+            .nivel_confianca ??
+          "MODERADA",
+
+        revisaoRecomendada:
+          resposta
+            .revisao_recomendada ??
+          false,
+
+        motivoRevisao:
+          resposta
+            .motivo_revisao ??
+          null,
+
         vegetacaoTotal:
           resposta
-            .vegetacao_total,
+            .vegetacao_total ??
+          0,
 
-        vegetacaoBaixa:
+        vegetacaoInteresse:
           resposta
-            .vegetacao_baixa,
+            .vegetacao_interesse ??
+          resposta
+            .vegetacao_total ??
+          0,
 
-        vegetacaoAlta:
+        arvore:
           resposta
-            .vegetacao_alta,
+            .arvore ??
+          0,
 
-        patchesAnalisados:
+        background:
           resposta
-            .patches_analisados,
+            .background ??
+          0,
+
+        pAcimaNormal:
+          resposta
+            .ordinal
+            ?.p_acima_normal ??
+          0,
+
+        pAcimaAtencao:
+          resposta
+            .ordinal
+            ?.p_acima_atencao ??
+          0,
+
+        limiarAtencao:
+          resposta
+            .ordinal
+            ?.limiar_atencao ??
+          0.5,
+
+        limiarCritico:
+          resposta
+            .ordinal
+            ?.limiar_critico ??
+          0.65,
 
         probabilidadeNormal:
           resposta
@@ -2843,87 +3000,67 @@ export default function AnaliseScreen() {
 
                 {resultado.classe !==
                   "INCONCLUSIVO" && (
-                  <Text
-                    style={
-                      styles.confidence
-                    }
-                  >
-                    Confiança: {
-                      (
+                  <>
+                    <Text
+                      style={
+                        styles.confidence
+                      }
+                    >
+                      Confiança da decisão: {
                         resultado
-                          .confianca *
-                        100
-                      ).toFixed(
-                        2
-                      )
-                    }%
-                  </Text>
+                          .confiancaPercentual
+                          .toFixed(
+                            2
+                          )
+                      }%
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.confidenceLevel
+                      }
+                    >
+                      Nível de confiança: {
+                        resultado
+                          .nivelConfianca
+                      }
+                    </Text>
+                  </>
                 )}
 
 
-                <View
-                  style={
-                    styles.aiBox
-                  }
-                >
-
-                  <Text
+                {resultado
+                  .revisaoRecomendada && (
+                  <View
                     style={
-                      styles.aiText
+                      styles.reviewBox
                     }
                   >
-                    Vegetação detectada: {
-                      resultado
-                        .vegetacaoTotal
-                        .toFixed(
-                          2
-                        )
-                    }%
-                  </Text>
+                    <Text
+                      style={
+                        styles.reviewTitle
+                      }
+                    >
+                      ⚠ Revisão recomendada
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.reviewText
+                      }
+                    >
+                      {
+                        resultado
+                          .motivoRevisao ??
+                        "O resultado deve ser conferido pelo operador."
+                      }
+                    </Text>
+                  </View>
+                )}
 
 
-                  <Text
-                    style={
-                      styles.aiText
-                    }
-                  >
-                    Vegetação baixa: {
-                      resultado
-                        .vegetacaoBaixa
-                        .toFixed(
-                          2
-                        )
-                    }%
-                  </Text>
-
-
-                  <Text
-                    style={
-                      styles.aiText
-                    }
-                  >
-                    Vegetação alta: {
-                      resultado
-                        .vegetacaoAlta
-                        .toFixed(
-                          2
-                        )
-                    }%
-                  </Text>
-
-
-                  <Text
-                    style={
-                      styles.aiText
-                    }
-                  >
-                    Regiões analisadas: {
-                      resultado
-                        .patchesAnalisados
-                    }
-                  </Text>
-
-                </View>
+                {/* Detalhes técnicos da segmentação e do classificador
+                    ficam somente na API e não são exibidos ao operador. */}
 
               </>
 
@@ -3675,6 +3812,258 @@ const styles =
     },
 
 
+    confidenceLevel: {
+      color:
+        "#21894A",
+
+      fontSize:
+        12,
+
+      fontWeight:
+        "700",
+
+      marginTop:
+        4,
+    },
+
+
+    reviewBox: {
+      width:
+        "100%",
+
+      backgroundColor:
+        "#FFF7E3",
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#E8C86A",
+
+      borderRadius:
+        12,
+
+      padding:
+        14,
+
+      marginTop:
+        16,
+    },
+
+
+    reviewTitle: {
+      color:
+        "#8A6210",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    reviewText: {
+      color:
+        "#745C28",
+
+      fontSize:
+        12,
+
+      lineHeight:
+        18,
+
+      marginTop:
+        5,
+    },
+
+
+    metricsTitle: {
+      color:
+        "#164B2A",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "bold",
+
+      marginBottom:
+        10,
+    },
+
+
+    metricRow: {
+      width:
+        "100%",
+
+      flexDirection:
+        "row",
+
+      justifyContent:
+        "space-between",
+
+      alignItems:
+        "center",
+
+      marginVertical:
+        4,
+    },
+
+
+    metricRowSpacing: {
+      marginTop:
+        12,
+    },
+
+
+    metricLabel: {
+      flex:
+        1,
+
+      color:
+        "#526157",
+
+      fontSize:
+        12,
+
+      paddingRight:
+        12,
+    },
+
+
+    metricValue: {
+      color:
+        "#1D2A21",
+
+      fontSize:
+        12,
+
+      fontWeight:
+        "700",
+    },
+
+
+    ordinalBox: {
+      width:
+        "100%",
+
+      backgroundColor:
+        "#EDF5EF",
+
+      borderRadius:
+        12,
+
+      padding:
+        15,
+
+      marginTop:
+        14,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#D2E4D7",
+    },
+
+
+    ordinalTitle: {
+      color:
+        "#164B2A",
+
+      fontSize:
+        14,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    ordinalHelp: {
+      color:
+        "#667168",
+
+      fontSize:
+        11,
+
+      lineHeight:
+        17,
+
+      marginTop:
+        5,
+
+      marginBottom:
+        10,
+    },
+
+
+    thresholdText: {
+      color:
+        "#778078",
+
+      fontSize:
+        10,
+
+      marginTop:
+        2,
+    },
+
+
+    probabilityBox: {
+      width:
+        "100%",
+
+      backgroundColor:
+        "#F8F9F8",
+
+      borderRadius:
+        12,
+
+      padding:
+        15,
+
+      marginTop:
+        14,
+
+      borderWidth:
+        1,
+
+      borderColor:
+        "#E1E7E2",
+    },
+
+
+    probabilityTitle: {
+      color:
+        "#1D2A21",
+
+      fontSize:
+        13,
+
+      fontWeight:
+        "bold",
+    },
+
+
+    probabilityHelp: {
+      color:
+        "#7A817C",
+
+      fontSize:
+        10,
+
+      lineHeight:
+        15,
+
+      marginTop:
+        4,
+
+      marginBottom:
+        8,
+    },
+
+
     rules: {
       color:
         "#778078",
@@ -3798,5 +4187,6 @@ const styles =
     },
 
   });
+
 
   

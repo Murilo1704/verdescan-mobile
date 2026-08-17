@@ -5,172 +5,133 @@ import {
 } from "../types/Ocorrencia";
 
 
+// ============================================================
+// CHAVES
+// ============================================================
+
 const STORAGE_KEY =
   "@verdescan_ocorrencias";
 
 
-// ============================================================
-// VALIDAR OCORRÊNCIA
-// ============================================================
+// Esta chave serve SOMENTE para limpar os dados antigos
+// uma única vez antes da gravação do protótipo.
+//
+// Depois que executar uma vez, ela fica marcada como concluída
+// e os novos registros NÃO serão apagados novamente.
 
-function ocorrenciaValida(
-  item: any
-): item is Ocorrencia {
-  if (
-    !item ||
-    typeof item !==
-      "object"
-  ) {
-    return false;
-  }
-
-
-  // ---------------------------------------------------------
-  // DADOS OBRIGATÓRIOS DA VERSÃO ATUAL
-  // ---------------------------------------------------------
-
-  if (
-    typeof item.id !==
-      "string"
-  ) {
-    return false;
-  }
-
-
-  if (
-    typeof item.data !==
-      "string"
-  ) {
-    return false;
-  }
-
-
-  if (
-    typeof item.rodovia !==
-      "string" ||
-    item.rodovia
-      .trim()
-      .length === 0
-  ) {
-    return false;
-  }
-
-
-  if (
-    typeof item.km !==
-      "number" ||
-    !Number.isFinite(
-      item.km
-    )
-  ) {
-    return false;
-  }
-
-
-  if (
-    typeof item.latitude !==
-      "number" ||
-    !Number.isFinite(
-      item.latitude
-    )
-  ) {
-    return false;
-  }
-
-
-  if (
-    typeof item.longitude !==
-      "number" ||
-    !Number.isFinite(
-      item.longitude
-    )
-  ) {
-    return false;
-  }
-
-
-  if (
-    item.classe !==
-      "NORMAL" &&
-    item.classe !==
-      "ATENCAO" &&
-    item.classe !==
-      "CRITICO"
-  ) {
-    return false;
-  }
-
-
-  return true;
-}
+const RESET_VIDEO_KEY =
+  "@verdescan_reset_video_2026_08_17_v1";
 
 
 // ============================================================
-// NORMALIZAR OCORRÊNCIA
+// RETENÇÃO
 // ============================================================
 
-function normalizarOcorrencia(
-  item: Ocorrencia
-): Ocorrencia {
-  return {
-    ...item,
-
-    rodovia:
-      item.rodovia
-        .trim()
-        .toUpperCase(),
-
-    km:
-      Number(
-        item.km
-      ),
-
-    latitude:
-      Number(
-        item.latitude
-      ),
-
-    longitude:
-      Number(
-        item.longitude
-      ),
-
-    confianca:
-      Number(
-        item.confianca ??
-        0
-      ),
-
-    status:
-      item.status ??
-      "PENDENTE",
-  };
-}
+const MESES_RETENCAO = 6;
 
 
 // ============================================================
-// SALVAR TODAS
+// RESET ÚNICO PARA A GRAVAÇÃO
 // ============================================================
 
-export async function salvarOcorrencias(
-  ocorrencias:
-    Ocorrencia[]
-) {
+async function executarResetInicialSeNecessario() {
   try {
-    const validas =
-      ocorrencias
-        .filter(
-          ocorrenciaValida
-        )
-        .map(
-          normalizarOcorrencia
-        );
+    const resetJaExecutado =
+      await AsyncStorage.getItem(
+        RESET_VIDEO_KEY
+      );
 
+
+    if (
+      resetJaExecutado ===
+      "CONCLUIDO"
+    ) {
+      return;
+    }
+
+
+    // Apaga somente as ocorrências.
+    // Login e outras configurações permanecem.
 
     await AsyncStorage.setItem(
       STORAGE_KEY,
+      JSON.stringify([])
+    );
+
+
+    await AsyncStorage.setItem(
+      RESET_VIDEO_KEY,
+      "CONCLUIDO"
+    );
+
+
+    console.log(
+      "✅ VerdeScan: registros antigos apagados para a gravação."
+    );
+
+  } catch (error) {
+    console.error(
+      "Erro ao executar reset inicial:",
+      error
+    );
+  }
+}
+
+
+// ============================================================
+// VERIFICAR SE A OCORRÊNCIA EXPIROU
+// ============================================================
+
+function ocorrenciaAindaValida(
+  ocorrencia: Ocorrencia
+) {
+  const dataOcorrencia =
+    new Date(
+      ocorrencia.data
+    );
+
+
+  // Se houver algum registro antigo com data inválida,
+  // preferimos NÃO apagar automaticamente.
+
+  if (
+    Number.isNaN(
+      dataOcorrencia.getTime()
+    )
+  ) {
+    return true;
+  }
+
+
+  const dataLimite =
+    new Date();
+
+
+  dataLimite.setMonth(
+    dataLimite.getMonth() -
+      MESES_RETENCAO
+  );
+
+
+  return (
+    dataOcorrencia.getTime() >=
+    dataLimite.getTime()
+  );
+}
+
+
+// ============================================================
+// SALVAR LISTA COMPLETA
+// ============================================================
+
+export async function salvarOcorrencias(
+  ocorrencias: Ocorrencia[]
+) {
+  try {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
       JSON.stringify(
-        validas
+        ocorrencias
       )
     );
 
@@ -179,23 +140,39 @@ export async function salvarOcorrencias(
       "Erro ao salvar ocorrências:",
       error
     );
+
+    throw error;
   }
 }
 
 
 // ============================================================
 // CARREGAR
+//
+// Também executa:
+// 1. reset inicial da gravação;
+// 2. limpeza de registros com mais de 6 meses.
 // ============================================================
 
 export async function carregarOcorrencias():
   Promise<Ocorrencia[]> {
 
   try {
+    // --------------------------------------------------------
+    // RESET ÚNICO
+    // --------------------------------------------------------
+
+    await executarResetInicialSeNecessario();
+
+
+    // --------------------------------------------------------
+    // CARREGAR STORAGE
+    // --------------------------------------------------------
+
     const dados =
-      await AsyncStorage
-        .getItem(
-          STORAGE_KEY
-        );
+      await AsyncStorage.getItem(
+        STORAGE_KEY
+      );
 
 
     if (!dados) {
@@ -203,7 +180,7 @@ export async function carregarOcorrencias():
     }
 
 
-    const parsed =
+    const dadosConvertidos =
       JSON.parse(
         dados
       );
@@ -211,47 +188,45 @@ export async function carregarOcorrencias():
 
     if (
       !Array.isArray(
-        parsed
+        dadosConvertidos
       )
     ) {
       return [];
     }
 
 
-    // -------------------------------------------------------
-    // REMOVE AUTOMATICAMENTE REGISTROS DE VERSÕES ANTIGAS
-    // QUE NÃO POSSUEM O FORMATO ATUAL
-    // -------------------------------------------------------
+    const ocorrencias =
+      dadosConvertidos as
+        Ocorrencia[];
+
+
+    // --------------------------------------------------------
+    // APAGAR AUTOMATICAMENTE > 6 MESES
+    // --------------------------------------------------------
 
     const ocorrenciasValidas =
-      parsed
-        .filter(
-          ocorrenciaValida
-        )
-        .map(
-          normalizarOcorrencia
-        );
-
-
-    // -------------------------------------------------------
-    // SE EXISTIAM DADOS ANTIGOS,
-    // LIMPA O STORAGE AUTOMATICAMENTE
-    // -------------------------------------------------------
-
-    if (
-      ocorrenciasValidas.length !==
-      parsed.length
-    ) {
-      console.log(
-        "VerdeScan: registros antigos incompatíveis foram removidos."
+      ocorrencias.filter(
+        ocorrenciaAindaValida
       );
 
 
-      await AsyncStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify(
-          ocorrenciasValidas
-        )
+    // Se alguma ocorrência expirou,
+    // atualiza o AsyncStorage automaticamente.
+
+    if (
+      ocorrenciasValidas.length !==
+      ocorrencias.length
+    ) {
+      await salvarOcorrencias(
+        ocorrenciasValidas
+      );
+
+
+      console.log(
+        `${
+          ocorrencias.length -
+          ocorrenciasValidas.length
+        } ocorrência(s) antiga(s) removida(s) automaticamente.`
       );
     }
 
@@ -264,6 +239,7 @@ export async function carregarOcorrencias():
       error
     );
 
+
     return [];
   }
 }
@@ -274,47 +250,26 @@ export async function carregarOcorrencias():
 // ============================================================
 
 export async function adicionarOcorrencia(
-  ocorrencia:
-    Ocorrencia
+  ocorrencia: Ocorrencia
 ) {
   const ocorrencias =
     await carregarOcorrencias();
 
 
-  if (
-    !ocorrenciaValida(
-      ocorrencia
-    )
-  ) {
-    throw new Error(
-      "Tentativa de salvar uma ocorrência inválida."
-    );
-  }
-
-
-  const nova =
-    normalizarOcorrencia(
-      ocorrencia
-    );
-
-
-  const atualizadas = [
-    nova,
+  const novaLista = [
     ...ocorrencias,
+    ocorrencia,
   ];
 
 
   await salvarOcorrencias(
-    atualizadas
+    novaLista
   );
-
-
-  return atualizadas;
 }
 
 
 // ============================================================
-// REMOVER
+// REMOVER UMA OCORRÊNCIA
 // ============================================================
 
 export async function removerOcorrencia(
@@ -324,18 +279,78 @@ export async function removerOcorrencia(
     await carregarOcorrencias();
 
 
-  const atualizadas =
+  const novaLista =
     ocorrencias.filter(
-      (item) =>
-        item.id !==
-        id
+      (ocorrencia) =>
+        ocorrencia.id !== id
     );
 
 
   await salvarOcorrencias(
-    atualizadas
+    novaLista
   );
 
 
-  return atualizadas;
+  return novaLista;
+}
+
+
+// ============================================================
+// ATUALIZAR UMA OCORRÊNCIA
+// ============================================================
+
+export async function atualizarOcorrencia(
+  ocorrenciaAtualizada:
+    Ocorrencia
+) {
+  const ocorrencias =
+    await carregarOcorrencias();
+
+
+  const novaLista =
+    ocorrencias.map(
+      (ocorrencia) =>
+        ocorrencia.id ===
+        ocorrenciaAtualizada.id
+          ? ocorrenciaAtualizada
+          : ocorrencia
+    );
+
+
+  await salvarOcorrencias(
+    novaLista
+  );
+
+
+  return novaLista;
+}
+
+
+// ============================================================
+// APAGAR TODAS
+//
+// Mantive essa função porque pode ser útil depois
+// para testes ou uma tela administrativa.
+// ============================================================
+
+export async function limparTodasOcorrencias() {
+  try {
+    await AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([])
+    );
+
+
+    console.log(
+      "✅ Todas as ocorrências foram removidas."
+    );
+
+  } catch (error) {
+    console.error(
+      "Erro ao limpar ocorrências:",
+      error
+    );
+
+    throw error;
+  }
 }
